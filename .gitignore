@@ -1,0 +1,26 @@
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# Python / Backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+spss_studio.db
+
+# Environment & Secret files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db

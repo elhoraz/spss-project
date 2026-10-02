@@ -1,0 +1,1170 @@
+/* ==========================================================================
+   OpenSPSS Statistics Studio - Comprehensive Design System & Desktop Theme
+   ========================================================================== */
+
+:root {
+  /* Default: Modern SPSS Classic Light */
+  --bg-app: #eef1f5;
+  --bg-window: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-menu: #f1f4f8;
+  --bg-menu-hover: #dbe4ef;
+  --bg-toolbar: #f8fafc;
+  --bg-header: #e9eef4;
+  --bg-header-hover: #dfe6ee;
+  --bg-row-header: #f3f6f9;
+  --bg-selected-cell: #e0edff;
+  --border-app: #cfd8dc;
+  --border-cell: #e2e8f0;
+  --border-header: #cbd5e1;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+  --accent: #1976d2;
+  --accent-hover: #1565c0;
+  --accent-light: #e3f2fd;
+  --accent-text: #ffffff;
+  --danger: #ef4444;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --table-border-spss: #1e293b;
+  --table-header-bg: #f8fafc;
+  --table-zebra-bg: #fdfdfd;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.15);
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', Consolas, Monaco, 'Courier New', monospace;
+}
+
+[data-theme='academic-dark'] {
+  --bg-app: #0b0f19;
+  --bg-window: #111827;
+  --bg-surface: #1e293b;
+  --bg-menu: #1e293b;
+  --bg-menu-hover: #334155;
+  --bg-toolbar: #162032;
+  --bg-header: #1e293b;
+  --bg-header-hover: #29384d;
+  --bg-row-header: #1e293b;
+  --bg-selected-cell: #1e3a5f;
+  --border-app: #334155;
+  --border-cell: #293548;
+  --border-header: #334155;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --accent-light: #0c2d48;
+  --accent-text: #0f172a;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --table-border-spss: #94a3b8;
+  --table-header-bg: #1e293b;
+  --table-zebra-bg: #162032;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.7);
+}
+
+[data-theme='spss-classic'] {
+  --bg-app: #e0e4e8;
+  --bg-window: #f0f2f5;
+  --bg-surface: #ffffff;
+  --bg-menu: #ebeef2;
+  --bg-menu-hover: #cce0ff;
+  --bg-toolbar: #eceff2;
+  --bg-header: #e4e7eb;
+  --bg-header-hover: #d5dae0;
+  --bg-row-header: #e8ecf0;
+  --bg-selected-cell: #cce4f7;
+  --border-app: #b0b8c0;
+  --border-cell: #d0d7de;
+  --border-header: #b8c0c8;
+  --text-main: #000000;
+  --text-muted: #4b5563;
+  --text-dim: #9ca3af;
+  --accent: #0b57d0;
+  --accent-hover: #0842a0;
+  --accent-light: #e8f0fe;
+  --accent-text: #ffffff;
+  --danger: #d93025;
+  --success: #188038;
+  --warning: #e37400;
+  --table-border-spss: #000000;
+  --table-header-bg: #ffffff;
+  --table-zebra-bg: #fcfcfc;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.1);
+  --shadow-md: 0 3px 8px rgba(0,0,0,0.12);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.18);
+}
+
+/* ==========================================================================
+   Base Elements
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  height: 100vh;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-window);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-app);
+  border-radius: 4px;
+  border: 2px solid var(--bg-window);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* ==========================================================================
+   Desktop Application Shell
+   ========================================================================== */
+
+.spss-app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-app);
+  overflow: hidden;
+}
+
+/* 1. Window Titlebar */
+.spss-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-menu) 100%);
+  border-bottom: 1px solid var(--border-app);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.spss-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spss-titlebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: white;
+}
+
+.spss-titlebar-title {
+  font-weight: 600;
+  letter-spacing: -0.2px;
+}
+
+.spss-titlebar-status {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.spss-titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 2. Top Menu Bar */
+.spss-menubar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  background: var(--bg-menu);
+  border-bottom: 1px solid var(--border-app);
+  padding: 0 4px;
+  position: relative;
+  z-index: 100;
+}
+
+.spss-menu-item {
+  position: relative;
+}
+
+.spss-menu-button {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-main);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s ease;
+}
+
+.spss-menu-button:hover,
+.spss-menu-button.active {
+  background: var(--bg-menu-hover);
+  color: var(--accent);
+}
+
+/* Menu Dropdowns */
+.spss-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 240px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-app);
+  border-radius: 4px;
+  box-shadow: var(--shadow-md);
+  padding: 4px 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+}
+
+.spss-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-main);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  position: relative;
+}
+
+.spss-dropdown-item:hover {
+  background: var(--bg-menu-hover);
+  color: var(--accent);
+}
+
+.spss-dropdown-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spss-dropdown-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spss-dropdown-shortcut {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.spss-dropdown-divider {
+  height: 1px;
+  background: var(--border-cell);
+  margin: 4px 0;
+}
+
+/* Nested Submenu */
+.spss-dropdown-item:hover > .spss-submenu {
+  display: flex;
+}
+
+.spss-submenu {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 100%;
+  min-width: 230px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-app);
+  border-radius: 4px;
+  box-shadow: var(--shadow-md);
+  padding: 4px 0;
+  z-index: 210;
+  flex-direction: column;
+}
+
+/* 3. Toolbar */
+.spss-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border-app);
+  padding: 0 8px;
+  gap: 8px;
+}
+
+.spss-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.spss-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  cursor: pointer;
+  position: relative;
+  transition: all 0.12s ease;
+}
+
+.spss-toolbar-btn:hover {
+  background: var(--bg-menu-hover);
+  border-color: var(--border-header);
+}
+
+.spss-toolbar-btn.active {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.spss-toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background: var(--border-app);
+  margin: 0 4px;
+}
+
+/* Formula / Cell Coordinate Bar */
+.spss-cell-status-bar {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  background: var(--bg-window);
+  border-bottom: 1px solid var(--border-app);
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  gap: 16px;
+}
+
+.spss-active-cell-coord {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--bg-surface);
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-cell);
+}
+
+.spss-cell-value-display {
+  font-family: var(--font-mono);
+  color: var(--text-main);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Main Workspace & Bottom Tabs
+   ========================================================================== */
+
+.spss-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.spss-content-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Bottom Tab Bar */
+.spss-bottom-tabs {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  background: var(--bg-menu);
+  border-top: 1px solid var(--border-app);
+  padding-left: 6px;
+  gap: 2px;
+}
+
+.spss-tab-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  cursor: pointer;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  transition: all 0.15s;
+}
+
+.spss-tab-button:hover {
+  background: var(--bg-menu-hover);
+  color: var(--text-main);
+}
+
+.spss-tab-button.active {
+  background: var(--bg-surface);
+  color: var(--accent);
+  border-color: var(--border-app);
+  border-bottom: 1px solid var(--bg-surface);
+  margin-top: -1px;
+  font-weight: 600;
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.03);
+}
+
+/* Status Bar at very bottom */
+.spss-bottom-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  background: var(--bg-header);
+  border-top: 1px solid var(--border-app);
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Data View (Spreadsheet Grid)
+   ========================================================================== */
+
+.spss-grid-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  background: var(--bg-surface);
+}
+
+.spss-grid-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+/* Column Header Row */
+.spss-grid-th {
+  background: var(--bg-header);
+  border-right: 1px solid var(--border-header);
+  border-bottom: 2px solid var(--border-header);
+  padding: 4px 8px;
+  font-weight: 600;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 28px;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.spss-grid-th:hover {
+  background: var(--bg-header-hover);
+}
+
+.spss-var-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.spss-measure-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.8;
+}
+
+/* Corner Header (top-left) */
+.spss-grid-corner-th {
+  background: var(--bg-row-header);
+  border-right: 2px solid var(--border-header);
+  border-bottom: 2px solid var(--border-header);
+  width: 48px;
+  min-width: 48px;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 20;
+}
+
+/* Row Header (left numbers) */
+.spss-grid-row-header {
+  background: var(--bg-row-header);
+  border-right: 2px solid var(--border-header);
+  border-bottom: 1px solid var(--border-cell);
+  width: 48px;
+  min-width: 48px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  height: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.spss-grid-row-header.active-row {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Data Cells */
+.spss-grid-td {
+  border-right: 1px solid var(--border-cell);
+  border-bottom: 1px solid var(--border-cell);
+  padding: 2px 6px;
+  height: 24px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--bg-surface);
+  position: relative;
+  cursor: cell;
+}
+
+.spss-grid-td.align-left {
+  text-align: left;
+}
+.spss-grid-td.align-right {
+  text-align: right;
+}
+.spss-grid-td.align-center {
+  text-align: center;
+}
+
+.spss-grid-td.selected {
+  background-color: var(--bg-selected-cell);
+}
+
+.spss-grid-td.active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 2;
+}
+
+/* Inline Edit Input */
+.spss-cell-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  color: inherit;
+  padding: 0;
+}
+
+/* ==========================================================================
+   Variable View Grid
+   ========================================================================== */
+
+.spss-varview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+
+.spss-varview-th {
+  background: var(--bg-header);
+  border-right: 1px solid var(--border-header);
+  border-bottom: 2px solid var(--border-header);
+  padding: 6px 8px;
+  font-weight: 600;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 30px;
+}
+
+.spss-varview-td {
+  border-right: 1px solid var(--border-cell);
+  border-bottom: 1px solid var(--border-cell);
+  padding: 4px 8px;
+  height: 28px;
+  background: var(--bg-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spss-varview-input {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-main);
+  outline: none;
+}
+
+.spss-varview-input:focus {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+
+.spss-varview-select {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-main);
+  outline: none;
+  cursor: pointer;
+}
+
+.spss-varview-select:hover,
+.spss-varview-select:focus {
+  border-color: var(--border-app);
+  background: var(--bg-window);
+}
+
+.spss-ellipsis-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: var(--bg-window);
+  border: 1px solid var(--border-cell);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.spss-ellipsis-btn:hover {
+  background: var(--bg-menu-hover);
+  border-color: var(--accent);
+}
+
+/* ==========================================================================
+   Output Viewer
+   ========================================================================== */
+
+.spss-output-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-window);
+}
+
+/* Left Pane: Navigation Tree */
+.spss-output-tree-pane {
+  width: 260px;
+  min-width: 200px;
+  max-width: 400px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-app);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.spss-output-tree-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-cell);
+  background: var(--bg-header);
+}
+
+.spss-output-tree-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.spss-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.spss-tree-node:hover {
+  background: var(--bg-menu-hover);
+}
+
+.spss-tree-node.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.spss-tree-node.level-1 {
+  padding-left: 24px;
+}
+.spss-tree-node.level-2 {
+  padding-left: 36px;
+}
+
+/* Right Pane: Report Document */
+.spss-output-doc-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.spss-output-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-app);
+  background: var(--bg-header);
+  gap: 8px;
+}
+
+.spss-output-doc-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* Output Item Card */
+.spss-output-item-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-cell);
+  padding-bottom: 24px;
+}
+
+.spss-output-item-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Syntax Log Block */
+.spss-syntax-log-block {
+  background: var(--bg-menu);
+  border: 1px solid var(--border-app);
+  border-left: 4px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+/* SPSS Pivot Table (Classic Academic APA/SPSS Style) */
+.spss-pivot-table-wrapper {
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.spss-pivot-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text-main);
+}
+
+.spss-pivot-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--text-main);
+  min-width: 480px;
+  /* Authentic SPSS double horizontal border */
+  border-top: 2px solid var(--table-border-spss);
+  border-bottom: 2px solid var(--table-border-spss);
+}
+
+.spss-pivot-table th {
+  border-bottom: 1px solid var(--table-border-spss);
+  padding: 6px 12px;
+  font-weight: 600;
+  text-align: right;
+  background: var(--table-header-bg);
+}
+
+.spss-pivot-table th.align-left {
+  text-align: left;
+}
+.spss-pivot-table th.align-center {
+  text-align: center;
+}
+
+.spss-pivot-table td {
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-cell);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.spss-pivot-table td.align-left {
+  text-align: left;
+}
+.spss-pivot-table td.align-center {
+  text-align: center;
+}
+
+.spss-pivot-table tr:hover td {
+  background: var(--bg-selected-cell);
+}
+
+.spss-pivot-total-row {
+  border-top: 1px solid var(--table-border-spss);
+  font-weight: 600;
+}
+
+.spss-pivot-notes {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* ==========================================================================
+   Syntax Editor
+   ========================================================================== */
+
+.spss-syntax-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-surface);
+}
+
+.spss-syntax-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-app);
+}
+
+.spss-syntax-editor-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.spss-syntax-textarea {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: none;
+  outline: none;
+  resize: none;
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+
+/* ==========================================================================
+   Dialog Modals (Authentic SPSS 2-Box Selector)
+   ========================================================================== */
+
+.spss-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.spss-modal-dialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-app);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  width: 580px;
+  overflow: hidden;
+  animation: scaleUp 0.15s ease-out;
+}
+
+.spss-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border-app);
+}
+
+.spss-modal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.spss-modal-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  padding: 2px;
+}
+
+.spss-modal-close-btn:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.spss-modal-body {
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* SPSS Variable Transfer Layout */
+.spss-picker-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.spss-picker-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.spss-var-listbox {
+  border: 1px solid var(--border-app);
+  border-radius: 4px;
+  height: 220px;
+  overflow-y: auto;
+  background: var(--bg-window);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spss-var-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.spss-var-list-item:hover {
+  background: var(--bg-menu-hover);
+}
+
+.spss-var-list-item.selected {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Transfer Arrow Buttons (SPSS Classic) */
+.spss-transfer-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.spss-transfer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-app);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-main);
+  transition: all 0.12s;
+}
+
+.spss-transfer-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.spss-transfer-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Modal Right Actions / Options */
+.spss-modal-actions-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100px;
+}
+
+.spss-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border-app);
+  background: var(--bg-menu);
+  color: var(--text-main);
+  transition: all 0.12s;
+}
+
+.spss-btn:hover {
+  background: var(--bg-menu-hover);
+  border-color: var(--border-header);
+}
+
+.spss-btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.spss-btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.spss-btn-danger {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+/* Modal Checkbox & Inputs */
+.spss-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-main);
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.spss-text-input {
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-app);
+  border-radius: 4px;
+  background: var(--bg-window);
+  color: var(--text-main);
+  outline: none;
+  width: 100%;
+}
+
+.spss-text-input:focus {
+  border-color: var(--accent);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
