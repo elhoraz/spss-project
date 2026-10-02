@@ -1,6 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { VariableMeta } from '../types/spss';
+import { GridContextMenu } from './GridContextMenu';
+
+interface SelectionRange {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  type: 'cell' | 'row' | 'col';
+  targetRow: number;
+  targetCol: number;
+}
 
 interface DataViewGridProps {
   variables: VariableMeta[];
@@ -9,6 +25,11 @@ interface DataViewGridProps {
   onCellChange: (rowIndex: number, varName: string, value: any) => void;
   onAddRow: () => void;
   onAddVariable: () => void;
+  onInsertRow?: (beforeIndex: number) => void;
+  onInsertVariable?: (beforeIndex: number) => void;
+  onClearCells?: (range: SelectionRange) => void;
+  onSortCases?: (varName: string, ascending: boolean) => void;
+  onQuickDescriptives?: (varName: string) => void;
   onSwitchToVariableView: (varName?: string) => void;
 }
 
@@ -19,11 +40,25 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   onCellChange,
   onAddRow,
   onAddVariable,
+  onInsertRow,
+  onInsertVariable,
+  onClearCells,
+  onSortCases,
+  onQuickDescriptives,
   onSwitchToVariableView,
 }) => {
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
+  const [selectionRange, setSelectionRange] = useState<SelectionRange>({
+    startRow: 0,
+    startCol: 0,
+    endRow: 0,
+    endCol: 0,
+  });
+  const [selectionType, setSelectionType] = useState<'cell' | 'row' | 'col'>('cell');
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -50,104 +85,59 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   // Keep selected row in view when navigating
   useEffect(() => {
-    if (!editingCell) {
+    if (!editingCell && selectedCell.row >= 0 && selectedCell.row < rows.length) {
       rowVirtualizer.scrollToIndex(selectedCell.row, { align: 'auto' });
     }
-  }, [selectedCell.row]);
+  }, [selectedCell.row, rows.length]);
 
-  // Keyboard navigation & clipboard shortcuts on grid
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (editingCell) {
-        if (e.key === 'Enter') {
-          commitEdit();
-          if (selectedCell.row < rows.length - 1) {
-            setSelectedCell((prev) => ({ ...prev, row: prev.row + 1 }));
-          }
-        } else if (e.key === 'Escape') {
-          setEditingCell(null);
-        } else if (e.key === 'Tab') {
-          e.preventDefault();
-          commitEdit();
-          if (selectedCell.col < variables.length - 1) {
-            setSelectedCell((prev) => ({ ...prev, col: prev.col + 1 }));
-          }
-        }
-        return;
-      }
+  // Handle cell selection
+  const selectSingleCell = (rIdx: number, cIdx: number) => {
+    setSelectedCell({ row: rIdx, col: cIdx });
+    setSelectionRange({ startRow: rIdx, startCol: cIdx, endRow: rIdx, endCol: cIdx });
+    setSelectionType('cell');
+  };
 
-      // Clipboard Copy (Ctrl+C)
-      if (e.ctrlKey && e.key === 'c') {
-        const varMeta = variables[selectedCell.col];
-        if (varMeta && rows[selectedCell.row]) {
-          const val = rows[selectedCell.row][varMeta.name];
-          navigator.clipboard.writeText(val !== undefined && val !== null ? String(val) : '');
-        }
-        return;
-      }
+  // Handle full row selection
+  const selectFullRow = (rIdx: number) => {
+    setSelectedCell({ row: rIdx, col: 0 });
+    setSelectionRange({
+      startRow: rIdx,
+      startCol: 0,
+      endRow: rIdx,
+      endCol: Math.max(0, variables.length - 1),
+    });
+    setSelectionType('row');
+  };
 
-      // Clipboard Paste (Ctrl+V)
-      if (e.ctrlKey && e.key === 'v') {
-        navigator.clipboard.readText().then((text) => {
-          if (!text) return;
-          const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
-          lines.forEach((line, rOffset) => {
-            const rIdx = selectedCell.row + rOffset;
-            if (rIdx < rows.length) {
-              const cells = line.split('\t');
-              cells.forEach((cellVal, cOffset) => {
-                const cIdx = selectedCell.col + cOffset;
-                if (cIdx < variables.length) {
-                  const varMeta = variables[cIdx];
-                  let parsed: any = cellVal.trim();
-                  if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-                    const num = parseFloat(parsed.replace(/[\$,]/g, ''));
-                    parsed = isNaN(num) ? parsed : num;
-                  }
-                  onCellChange(rIdx, varMeta.name, parsed);
-                }
-              });
-            }
-          });
-        });
-        return;
-      }
+  // Handle full column selection
+  const selectFullColumn = (cIdx: number) => {
+    setSelectedCell({ row: 0, col: cIdx });
+    setSelectionRange({
+      startRow: 0,
+      startCol: cIdx,
+      endRow: Math.max(0, rows.length - 1),
+      endCol: cIdx,
+    });
+    setSelectionType('col');
+  };
 
-      // Fill Down (Ctrl+D)
-      if (e.ctrlKey && e.key === 'd') {
-        e.preventDefault();
-        if (selectedCell.row < rows.length - 1 && variables[selectedCell.col]) {
-          const varName = variables[selectedCell.col].name;
-          const currentVal = rows[selectedCell.row][varName];
-          onCellChange(selectedCell.row + 1, varName, currentVal);
-          setSelectedCell((prev) => ({ ...prev, row: prev.row + 1 }));
-        }
-        return;
-      }
+  // Check if a cell is inside the current selection range
+  const isCellInRange = (r: number, c: number) => {
+    const minR = Math.min(selectionRange.startRow, selectionRange.endRow);
+    const maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
+    const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
+    const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+    return r >= minR && r <= maxR && c >= minC && c <= maxC;
+  };
 
-      // Not editing - navigate
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedCell((prev) => ({ ...prev, row: Math.max(0, prev.row - 1) }));
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedCell((prev) => ({ ...prev, row: Math.min(rows.length - 1, prev.row + 1) }));
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        setSelectedCell((prev) => ({ ...prev, col: Math.max(0, prev.col - 1) }));
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        setSelectedCell((prev) => ({ ...prev, col: Math.min(variables.length - 1, prev.col + 1) }));
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        startEditing(selectedCell.row, selectedCell.col);
-      }
-    };
+  // Check if row is filtered out (filter_$ == 0)
+  const isRowFiltered = (row: Record<string, any>) => {
+    if (!row) return false;
+    const f = row['filter_$'];
+    return f !== undefined && (f === 0 || f === '0' || f === false);
+  };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingCell, selectedCell, variables, rows, editValue]);
-
+  // Edit lifecycle
   const startEditing = (rIdx: number, cIdx: number) => {
     if (cIdx >= variables.length || rIdx >= rows.length) return;
     const varName = variables[cIdx].name;
@@ -169,6 +159,163 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     onCellChange(editingCell.row, varMeta.name, parsedVal);
     setEditingCell(null);
   };
+
+  // Clipboard operations
+  const handleCopy = () => {
+    const minR = Math.min(selectionRange.startRow, selectionRange.endRow);
+    const maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
+    const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
+    const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+
+    const lines: string[] = [];
+    for (let r = minR; r <= maxR; r++) {
+      const rowVals: string[] = [];
+      for (let c = minC; c <= maxC; c++) {
+        const vMeta = variables[c];
+        const val = rows[r]?.[vMeta?.name];
+        rowVals.push(val !== undefined && val !== null ? String(val) : '');
+      }
+      lines.push(rowVals.join('\t'));
+    }
+    navigator.clipboard.writeText(lines.join('\r\n'));
+  };
+
+  const handleCut = () => {
+    handleCopy();
+    handleClearSelection();
+  };
+
+  const handlePaste = () => {
+    navigator.clipboard.readText().then((text) => {
+      if (!text) return;
+      const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+      lines.forEach((line, rOffset) => {
+        const rIdx = selectedCell.row + rOffset;
+        if (rIdx < rows.length) {
+          const cells = line.split('\t');
+          cells.forEach((cellVal, cOffset) => {
+            const cIdx = selectedCell.col + cOffset;
+            if (cIdx < variables.length) {
+              const varMeta = variables[cIdx];
+              let parsed: any = cellVal.trim();
+              if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
+                const num = parseFloat(parsed.replace(/[\$,]/g, ''));
+                parsed = isNaN(num) ? parsed : num;
+              }
+              onCellChange(rIdx, varMeta.name, parsed);
+            }
+          });
+        }
+      });
+    });
+  };
+
+  const handleClearSelection = () => {
+    if (onClearCells) {
+      onClearCells(selectionRange);
+      return;
+    }
+    const minR = Math.min(selectionRange.startRow, selectionRange.endRow);
+    const maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
+    const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
+    const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) {
+        const vMeta = variables[c];
+        if (vMeta) {
+          onCellChange(r, vMeta.name, null);
+        }
+      }
+    }
+  };
+
+  // Keyboard navigation & clipboard shortcuts on grid
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingCell) {
+        if (e.key === 'Enter') {
+          commitEdit();
+          if (selectedCell.row < rows.length - 1) {
+            selectSingleCell(selectedCell.row + 1, selectedCell.col);
+          }
+        } else if (e.key === 'Escape') {
+          setEditingCell(null);
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          commitEdit();
+          if (selectedCell.col < variables.length - 1) {
+            selectSingleCell(selectedCell.row, selectedCell.col + 1);
+          }
+        }
+        return;
+      }
+
+      // F2 to start editing
+      if (e.key === 'F2') {
+        e.preventDefault();
+        startEditing(selectedCell.row, selectedCell.col);
+        return;
+      }
+
+      // Clipboard Copy (Ctrl+C)
+      if (e.ctrlKey && e.key === 'c') {
+        handleCopy();
+        return;
+      }
+
+      // Clipboard Cut (Ctrl+X)
+      if (e.ctrlKey && e.key === 'x') {
+        handleCut();
+        return;
+      }
+
+      // Clipboard Paste (Ctrl+V)
+      if (e.ctrlKey && e.key === 'v') {
+        handlePaste();
+        return;
+      }
+
+      // Delete key clears selection
+      if (e.key === 'Delete') {
+        handleClearSelection();
+        return;
+      }
+
+      // Fill Down (Ctrl+D)
+      if (e.ctrlKey && e.key === 'd') {
+        e.preventDefault();
+        if (selectedCell.row < rows.length - 1 && variables[selectedCell.col]) {
+          const varName = variables[selectedCell.col].name;
+          const currentVal = rows[selectedCell.row][varName];
+          onCellChange(selectedCell.row + 1, varName, currentVal);
+          selectSingleCell(selectedCell.row + 1, selectedCell.col);
+        }
+        return;
+      }
+
+      // Not editing - navigate
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectSingleCell(Math.max(0, selectedCell.row - 1), selectedCell.col);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectSingleCell(Math.min(rows.length - 1, selectedCell.row + 1), selectedCell.col);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        selectSingleCell(selectedCell.row, Math.max(0, selectedCell.col - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        selectSingleCell(selectedCell.row, Math.min(variables.length - 1, selectedCell.col + 1));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        startEditing(selectedCell.row, selectedCell.col);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingCell, selectedCell, selectionRange, variables, rows, editValue]);
 
   // Helper to format cell display
   const formatCellValue = (val: any, varMeta: VariableMeta) => {
@@ -249,21 +396,49 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         <table className="spss-grid-table" style={{ width: 'max-content' }}>
           <thead>
             <tr>
-              <th className="spss-grid-corner-th" />
-              {variables.map((v) => (
-                <th
-                  key={v.name}
-                  className="spss-grid-th"
-                  style={{ width: Math.max(90, v.columns * 11) }}
-                  onDoubleClick={() => onSwitchToVariableView(v.name)}
-                  title={`Double-click to edit variable '${v.name}' in Variable View`}
-                >
-                  <div className="spss-var-header-content">
-                    {renderMeasureIcon(v.measure)}
-                    <span>{v.name}</span>
-                  </div>
-                </th>
-              ))}
+              <th
+                className="spss-grid-corner-th"
+                onClick={() => {
+                  setSelectedCell({ row: 0, col: 0 });
+                  setSelectionRange({
+                    startRow: 0,
+                    startCol: 0,
+                    endRow: Math.max(0, rows.length - 1),
+                    endCol: Math.max(0, variables.length - 1),
+                  });
+                  setSelectionType('cell');
+                }}
+                title="Select All (Ctrl+A)"
+              />
+              {variables.map((v, cIdx) => {
+                const isColSelected = selectionType === 'col' && selectedCell.col === cIdx;
+                return (
+                  <th
+                    key={v.name}
+                    className={`spss-grid-th ${isColSelected ? 'selected-full-col' : ''}`}
+                    style={{ width: Math.max(90, v.columns * 11) }}
+                    onClick={() => selectFullColumn(cIdx)}
+                    onDoubleClick={() => onSwitchToVariableView(v.name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      selectFullColumn(cIdx);
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        type: 'col',
+                        targetRow: selectedCell.row,
+                        targetCol: cIdx,
+                      });
+                    }}
+                    title={`Column ${v.name} (Right-click for options, Double-click for Variable View)`}
+                  >
+                    <div className="spss-var-header-content">
+                      {renderMeasureIcon(v.measure)}
+                      <span>{v.name}</span>
+                    </div>
+                  </th>
+                );
+              })}
               {/* Add Variable Column */}
               <th
                 className="spss-grid-th"
@@ -289,12 +464,29 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               const row = rows[rIdx];
               if (!row) return null;
 
+              const isRowSelected = selectionType === 'row' && selectedCell.row === rIdx;
+              const isFiltered = isRowFiltered(row);
+
               return (
                 <tr key={rIdx} style={{ height: 24 }}>
                   {/* Row Header Number */}
                   <td
-                    className={`spss-grid-row-header ${selectedCell.row === rIdx ? 'active-row' : ''}`}
-                    onClick={() => setSelectedCell((prev) => ({ ...prev, row: rIdx }))}
+                    className={`spss-grid-row-header ${isRowSelected ? 'selected-full-row' : ''} ${
+                      isFiltered ? 'filtered-case' : ''
+                    } ${selectedCell.row === rIdx ? 'active-row' : ''}`}
+                    onClick={() => selectFullRow(rIdx)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      selectFullRow(rIdx);
+                      setContextMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        type: 'row',
+                        targetRow: rIdx,
+                        targetCol: selectedCell.col,
+                      });
+                    }}
+                    title={isFiltered ? `Case ${rIdx + 1} (Filtered out by filter_$)` : `Case ${rIdx + 1}`}
                   >
                     {rIdx + 1}
                   </td>
@@ -302,6 +494,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                   {/* Data Cells */}
                   {variables.map((v, cIdx) => {
                     const isSelected = selectedCell.row === rIdx && selectedCell.col === cIdx;
+                    const inRange = isCellInRange(rIdx, cIdx);
                     const isEditing = editingCell?.row === rIdx && editingCell?.col === cIdx;
                     const cellVal = row[v.name];
                     const alignClass = `align-${v.align.toLowerCase()}`;
@@ -309,9 +502,22 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                     return (
                       <td
                         key={v.name}
-                        className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''}`}
-                        onClick={() => setSelectedCell({ row: rIdx, col: cIdx })}
+                        className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''} ${
+                          inRange && !isSelected ? 'in-selection-range' : ''
+                        }`}
+                        onClick={() => selectSingleCell(rIdx, cIdx)}
                         onDoubleClick={() => startEditing(rIdx, cIdx)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          selectSingleCell(rIdx, cIdx);
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            type: 'cell',
+                            targetRow: rIdx,
+                            targetCol: cIdx,
+                          });
+                        }}
                       >
                         {isEditing ? (
                           <input
@@ -364,6 +570,54 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Desktop Context Menu */}
+      {contextMenu && (
+        <GridContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          type={contextMenu.type}
+          varName={variables[contextMenu.targetCol]?.name}
+          caseNumber={contextMenu.targetRow + 1}
+          onClose={() => setContextMenu(null)}
+          onCut={handleCut}
+          onCopy={handleCopy}
+          onPaste={handlePaste}
+          onClear={handleClearSelection}
+          onInsertVariable={() => {
+            if (onInsertVariable) {
+              onInsertVariable(contextMenu.targetCol);
+            } else {
+              onAddVariable();
+            }
+          }}
+          onInsertCases={() => {
+            if (onInsertRow) {
+              onInsertRow(contextMenu.targetRow);
+            } else {
+              onAddRow();
+            }
+          }}
+          onSortAscending={() => {
+            const vName = variables[contextMenu.targetCol]?.name;
+            if (vName && onSortCases) {
+              onSortCases(vName, true);
+            }
+          }}
+          onSortDescending={() => {
+            const vName = variables[contextMenu.targetCol]?.name;
+            if (vName && onSortCases) {
+              onSortCases(vName, false);
+            }
+          }}
+          onDescriptives={() => {
+            const vName = variables[contextMenu.targetCol]?.name;
+            if (vName && onQuickDescriptives) {
+              onQuickDescriptives(vName);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

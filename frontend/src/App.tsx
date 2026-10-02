@@ -122,6 +122,84 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, variables: newVariables, rows: updatedRows });
   };
 
+  // Insert row before specified index
+  const handleInsertRow = (beforeIndex: number) => {
+    const newRow: Record<string, any> = {};
+    dataset.variables.forEach((v) => {
+      newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? 0 : '';
+    });
+    newRow.id = dataset.rows.length + 1;
+    const newRows = [...dataset.rows];
+    newRows.splice(beforeIndex, 0, newRow);
+    setDataset({ ...dataset, rows: newRows });
+  };
+
+  // Insert variable before specified index
+  const handleInsertVariable = (beforeIndex: number) => {
+    const varNum = dataset.variables.length + 1;
+    const newVarName = `VAR0000${varNum}`.slice(-8);
+    const newVar: VariableMeta = {
+      name: newVarName,
+      type: 'Numeric',
+      width: 8,
+      decimals: 2,
+      label: '',
+      values: {},
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Scale',
+      role: 'Input',
+    };
+    const newVars = [...dataset.variables];
+    newVars.splice(beforeIndex, 0, newVar);
+    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: 0 }));
+    setDataset({ ...dataset, variables: newVars, rows: updatedRows });
+  };
+
+  // Clear cells in selection range
+  const handleClearCells = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
+    const minR = Math.min(range.startRow, range.endRow);
+    const maxR = Math.max(range.startRow, range.endRow);
+    const minC = Math.min(range.startCol, range.endCol);
+    const maxC = Math.max(range.startCol, range.endCol);
+
+    const updatedRows = [...dataset.rows];
+    for (let r = minR; r <= maxR; r++) {
+      if (updatedRows[r]) {
+        const copy = { ...updatedRows[r] };
+        for (let c = minC; c <= maxC; c++) {
+          const vMeta = dataset.variables[c];
+          if (vMeta) {
+            copy[vMeta.name] = null;
+          }
+        }
+        updatedRows[r] = copy;
+      }
+    }
+    setDataset({ ...dataset, rows: updatedRows });
+  };
+
+  // Sort cases
+  const handleSortCases = (varName: string, ascending: boolean = true) => {
+    const sorted = [...dataset.rows].sort((a, b) => {
+      const vA = a[varName];
+      const vB = b[varName];
+      if (typeof vA === 'number' && typeof vB === 'number') {
+        return ascending ? vA - vB : vB - vA;
+      }
+      return ascending ? String(vA).localeCompare(String(vB)) : String(vB).localeCompare(String(vA));
+    });
+    setDataset({ ...dataset, rows: sorted });
+  };
+
+  // Quick descriptives from context menu
+  const handleQuickDescriptives = (varName: string) => {
+    const output = clientComputeDescriptives(dataset.rows, [varName]);
+    setOutputs((prev) => [output, ...prev]);
+    setActiveView('output');
+  };
+
   // Switch between sample datasets
   const handleSelectSampleDataset = (name: string) => {
     if (name.includes('Clinical')) {
@@ -239,6 +317,11 @@ export const App: React.FC = () => {
               onCellChange={handleCellChange}
               onAddRow={handleAddRow}
               onAddVariable={handleAddVariable}
+              onInsertRow={handleInsertRow}
+              onInsertVariable={handleInsertVariable}
+              onClearCells={handleClearCells}
+              onSortCases={handleSortCases}
+              onQuickDescriptives={handleQuickDescriptives}
               onSwitchToVariableView={(varName) => {
                 setActiveView('variable');
               }}
