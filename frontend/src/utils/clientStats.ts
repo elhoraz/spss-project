@@ -1350,6 +1350,77 @@ export function clientRunSyntax(syntaxText: string = '', rows: Record<string, an
         } else if (kwMatch) {
           outputs.push(clientComputeKruskalWallis(rows, kwMatch[1], kwMatch[2]));
         }
+      } else if (upper.startsWith('EXAMINE') || upper.startsWith('EXPLORE')) {
+        const m = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i) || cmd.match(/EXAMINE\s+([^/\.]+)/i);
+        if (m) {
+          const vars = m[1].replace(/,/g, ' ').trim().split(/\s+/);
+          outputs.push(clientComputeExplore(rows, vars));
+        }
+      } else if (upper.startsWith('FACTOR')) {
+        const m = cmd.match(/\/VARIABLES?\s+([^/\.]+)/i) || cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i) || cmd.match(/FACTOR\s+([^/\.]+)/i);
+        if (m) {
+          const vars = m[1].replace(/,/g, ' ').trim().split(/\s+/);
+          outputs.push(clientComputeFactorAnalysis(rows, vars));
+        }
+      } else if (upper.startsWith('LOGISTIC REGRESSION') || upper.startsWith('LOGISTIC')) {
+        const depM = cmd.match(/VARIABLES?\s+(\w+)/i);
+        const indepM = cmd.match(/METHOD\s*=\s*ENTER\s+([^/\.]+)/i) || cmd.match(/WITH\s+([^/\.]+)/i);
+        if (depM && indepM) {
+          const dep = depM[1];
+          const indeps = indepM[1].replace(/,/g, ' ').trim().split(/\s+/);
+          outputs.push(clientComputeLogisticRegression(rows, dep, indeps));
+        }
+      } else if (upper.startsWith('GRAPH')) {
+        const typeMatch = cmd.match(/\/([A-Z]+)\s*=\s*(\w+)(?:\s+BY\s+(\w+))?/i);
+        if (typeMatch) {
+          const gType = typeMatch[1].toLowerCase() as any;
+          const x = typeMatch[2];
+          const y = typeMatch[3];
+          outputs.push({
+            id: `chart_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            title: `${typeMatch[1].toUpperCase()} Chart of ${x}`,
+            type: 'chart',
+            syntax: cmd,
+            data: { chartType: gType, xVar: x, yVar: y, rows },
+          });
+        }
+      } else if (upper.startsWith('SORT CASES')) {
+        const m = cmd.match(/BY\s+(\w+)(?:\s*\(([AD])\))?/i);
+        if (m) {
+          outputs.push({
+            id: `dm_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            title: 'Sort Cases',
+            type: 'data_management',
+            syntax: cmd,
+            data: { Operation: 'SORT CASES', 'Key Variable': m[1], 'Sort Order': m[2] === 'D' ? 'Descending' : 'Ascending', Cases: rows.length },
+          });
+        }
+      } else if (upper.startsWith('SPLIT FILE')) {
+        const m = cmd.match(/BY\s+(\w+)/i);
+        if (m) {
+          outputs.push({
+            id: `dm_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            title: 'Split File',
+            type: 'data_management',
+            syntax: cmd,
+            data: { Operation: 'SPLIT FILE', 'Layer Variable': m[1], Status: 'Output stratified by groups' },
+          });
+        }
+      } else if (upper.startsWith('WEIGHT')) {
+        const m = cmd.match(/BY\s+(\w+)/i);
+        if (m) {
+          outputs.push({
+            id: `dm_${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            title: 'Weight Cases',
+            type: 'data_management',
+            syntax: cmd,
+            data: { Operation: 'WEIGHT CASES', 'Weight Variable': m[1], Status: 'Active case weights enabled' },
+          });
+        }
       }
     } catch (e: any) {
       outputs.push({

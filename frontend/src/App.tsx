@@ -12,7 +12,7 @@ import { ImportExportModal } from './components/ImportExportModal';
 import { AboutModal } from './components/AboutModal';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
-import { clientComputeDescriptives, clientComputeFrequencies } from './utils/clientStats';
+import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
 
 export const App: React.FC = () => {
   // Application State
@@ -42,6 +42,53 @@ export const App: React.FC = () => {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Global desktop keyboard shortcuts (Wave 6)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape closes open modals
+      if (e.key === 'Escape' && activeModal) {
+        setActiveModal(null);
+        return;
+      }
+
+      // F1 opens About / Help
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setActiveModal('about_spss');
+        return;
+      }
+
+      // Ctrl + 1/2/3/4 for view switching
+      if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+        if (e.key === '1') {
+          e.preventDefault();
+          setActiveView('data');
+        } else if (e.key === '2') {
+          e.preventDefault();
+          setActiveView('variable');
+        } else if (e.key === '3') {
+          e.preventDefault();
+          setActiveView('output');
+        } else if (e.key === '4') {
+          e.preventDefault();
+          setActiveView('syntax');
+        } else if (e.key === 'r' || e.key === 'R') {
+          if (activeView === 'syntax' && syntaxCode.trim()) {
+            e.preventDefault();
+            const gen = clientRunSyntax(syntaxCode, dataset.rows);
+            if (gen.length > 0) {
+              setOutputs((prev) => [...gen, ...prev]);
+              setActiveView('output');
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeModal, activeView, syntaxCode, dataset.rows]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'spss-classic' ? 'modern-light' : prev === 'modern-light' ? 'academic-dark' : 'spss-classic'));

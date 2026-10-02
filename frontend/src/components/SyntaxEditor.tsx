@@ -27,6 +27,8 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
     correlations_and_regression: `* Analysis 1: Bivariate Pearson correlations.\nCORRELATIONS\n  /VARIABLES=salary salbegin educ\n  /PRINT=TWOTAIL NOSIG.\n\n* Analysis 2: Multiple Linear Regression.\nREGRESSION\n  /DEPENDENT salary\n  /METHOD=ENTER salbegin educ.`,
     t_tests_and_anova: `* Analysis 1: Independent Samples T-Test by Gender.\nT-TEST GROUPS=gender('m' 'f')\n  /VARIABLES=salary.\n\n* Analysis 2: One-Way ANOVA by Employment Category.\nONEWAY salary BY jobcat\n  /STATISTICS DESCRIPTIVES\n  /POSTHOC=TUKEY.`,
     nonparametric_and_reliability: `* Analysis 1: Reliability Analysis (Cronbach's Alpha).\nRELIABILITY\n  /VARIABLES=salary salbegin educ\n  /SCALE('ALL VARIABLES') ALL\n  /MODEL=ALPHA.\n\n* Analysis 2: Mann-Whitney U Test.\nNPAR TESTS\n  /M-W= salary BY gender('m' 'f')\n  /MISSING ANALYSIS.`,
+    explore_and_factor: `* Analysis 1: Explore Normality Tests.\nEXAMINE VARIABLES=salary\n  /PLOT NPPLOT STEMLEAF\n  /STATISTICS DESCRIPTIVES EXTREME(5).\n\n* Analysis 2: Factor Analysis (PCA & Varimax).\nFACTOR\n  /VARIABLES salary salbegin educ\n  /EXTRACTION PC\n  /ROTATION VARIMAX.`,
+    logistic_regression: `* Analysis: Binary Logistic Regression.\nLOGISTIC REGRESSION VARIABLES gender\n  /METHOD=ENTER salary salbegin educ\n  /PRINT=GOODFIT CI(95).`,
   };
 
   const handleSelectPreset = (presetKey: string) => {
@@ -49,6 +51,10 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
         keywords: [
           'FREQUENCIES',
           'DESCRIPTIVES',
+          'EXAMINE',
+          'EXPLORE',
+          'FACTOR',
+          'LOGISTIC',
           'CROSSTABS',
           'CORRELATIONS',
           'REGRESSION',
@@ -90,6 +96,16 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
           'SCALE',
           'MODEL',
           'MISSING',
+          'EXTRACTION',
+          'ROTATION',
+          'NPPLOT',
+          'STEMLEAF',
+          'EXTREME',
+          'MINEIGEN',
+          'PIN',
+          'POUT',
+          'ITERATE',
+          'CUT',
           'BY',
           'WITH',
           'ENTER',
@@ -142,6 +158,9 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
           const spssKeywords = [
             { label: 'FREQUENCIES', insertText: 'FREQUENCIES VARIABLES=${1:var1 var2}\n  /ORDER=ANALYSIS.', documentation: 'Compute frequency tables for discrete variables' },
             { label: 'DESCRIPTIVES', insertText: 'DESCRIPTIVES VARIABLES=${1:var1 var2}\n  /STATISTICS=MEAN STDDEV MIN MAX.', documentation: 'Compute continuous descriptive metrics' },
+            { label: 'EXAMINE', insertText: 'EXAMINE VARIABLES=${1:var1}\n  /PLOT NPPLOT STEMLEAF\n  /STATISTICS DESCRIPTIVES EXTREME(5).', documentation: 'Explore data, Normality tests & Outliers' },
+            { label: 'FACTOR', insertText: 'FACTOR\n  /VARIABLES ${1:var1 var2 var3}\n  /EXTRACTION PC\n  /ROTATION VARIMAX.', documentation: 'Principal Component Analysis and Factor Extraction' },
+            { label: 'LOGISTIC REGRESSION', insertText: 'LOGISTIC REGRESSION VARIABLES ${1:dep_var}\n  /METHOD=ENTER ${2:indep_vars}\n  /PRINT=GOODFIT CI(95).', documentation: 'Binary Logistic Regression' },
             { label: 'CROSSTABS', insertText: 'CROSSTABS\n  /TABLES=${1:row_var} BY ${2:col_var}\n  /STATISTICS=CHISQ\n  /CELLS=COUNT EXPECTED ROW COLUMN TOTAL.', documentation: 'Contingency tables and Chi-Square test' },
             { label: 'CORRELATIONS', insertText: 'CORRELATIONS\n  /VARIABLES=${1:var1 var2}\n  /PRINT=TWOTAIL NOSIG.', documentation: 'Pearson correlation matrix' },
             { label: 'REGRESSION', insertText: 'REGRESSION\n  /DEPENDENT ${1:dep_var}\n  /METHOD=ENTER ${2:indep_vars}.', documentation: 'Linear regression analysis' },
@@ -274,6 +293,8 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
             <option value="correlations_and_regression">3. Correlations & Multiple Regression</option>
             <option value="t_tests_and_anova">4. Independent T-Test & One-Way ANOVA</option>
             <option value="nonparametric_and_reliability">5. Reliability & Mann-Whitney</option>
+            <option value="explore_and_factor">6. Explore Normality & Factor Analysis</option>
+            <option value="logistic_regression">7. Binary Logistic Regression</option>
           </select>
         </div>
       </div>
