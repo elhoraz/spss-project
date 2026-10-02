@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Upload, FileSpreadsheet, FileText, CheckCircle2, Database } from 'lucide-react';
+import { X, Upload, CheckCircle2, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Dataset, VariableMeta } from '../types/spss';
 import { employeeDataset, clinicalTrialDataset } from '../data/defaultDatasets';
@@ -44,7 +44,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           } else {
             setErrorMsg('Invalid JSON structure: Expected an array of objects.');
           }
-        } catch (err: any) {
+        } catch (_err: any) {
           setErrorMsg('Failed to parse JSON file.');
         }
       };

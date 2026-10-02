@@ -211,14 +211,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       } else if (modalType === 'paired_t_test') {
         const v1 = targetVars[0] || 'salary';
         const v2 = targetVars[1] || 'salbegin';
-        output = {
-          id: `out_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
-          title: 'Paired Samples T-Test',
-          type: 'paired_t_test',
-          syntax: `T-TEST PAIRS=${v1} WITH ${v2} (PAIRED).`,
-          data: clientComputeDescriptives(rows, [v1, v2]).data,
-        };
+        output = clientComputePairedTTest(rows, [[v1, v2]]);
       } else if (modalType === 'one_way_anova') {
         const d = depVar || targetVars[0] || 'salary';
         const f = factorVar || 'jobcat';
@@ -1167,37 +1160,76 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
               )}
 
               {activeSubDialog === 'options' && (
-                <div>
-                  <fieldset className="spss-subdialog-fieldset">
-                    <legend className="spss-subdialog-legend">Display Order</legend>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="displayOrder" defaultChecked /> Variable list
-                      </label>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="displayOrder" /> Alphabetic
-                      </label>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="displayOrder" /> Ascending means
-                      </label>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="displayOrder" /> Descending means
-                      </label>
-                    </div>
-                  </fieldset>
+                modalType === 'logistic_regression' ? (
+                  <div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Logistic Regression Options</legend>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>Confidence Interval for Exp(B):</span>
+                          <input
+                            type="number"
+                            className="spss-text-input"
+                            style={{ width: 60 }}
+                            value={logisticOptions.ciLevel}
+                            onChange={(e) => setLogisticOptions({ ...logisticOptions, ciLevel: parseFloat(e.target.value) || 95 })}
+                          />
+                          <span>%</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span>Classification cutoff:</span>
+                          <input
+                            type="number"
+                            step="0.05"
+                            className="spss-text-input"
+                            style={{ width: 60 }}
+                            value={logisticOptions.classificationCutoff}
+                            onChange={(e) => setLogisticOptions({ ...logisticOptions, classificationCutoff: parseFloat(e.target.value) || 0.5 })}
+                          />
+                        </div>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={logisticOptions.includeConstant}
+                            onChange={(e) => setLogisticOptions({ ...logisticOptions, includeConstant: e.target.checked })}
+                          /> Include constant in model
+                        </label>
+                      </div>
+                    </fieldset>
+                  </div>
+                ) : (
+                  <div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Display Order</legend>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="displayOrder" defaultChecked /> Variable list
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="displayOrder" /> Alphabetic
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="displayOrder" /> Ascending means
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="displayOrder" /> Descending means
+                        </label>
+                      </div>
+                    </fieldset>
 
-                  <fieldset className="spss-subdialog-fieldset">
-                    <legend className="spss-subdialog-legend">Missing Values</legend>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="missingValues" defaultChecked /> Exclude cases listwise
-                      </label>
-                      <label className="spss-checkbox-label">
-                        <input type="radio" name="missingValues" /> Exclude cases pairwise
-                      </label>
-                    </div>
-                  </fieldset>
-                </div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Missing Values</legend>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="missingValues" defaultChecked /> Exclude cases listwise
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input type="radio" name="missingValues" /> Exclude cases pairwise
+                        </label>
+                      </div>
+                    </fieldset>
+                  </div>
+                )
               )}
 
               {activeSubDialog === 'cells' && (

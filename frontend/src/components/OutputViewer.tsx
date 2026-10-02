@@ -8,11 +8,10 @@ import {
   Printer,
   FileSpreadsheet,
   Download,
-  Share2,
 } from 'lucide-react';
 import { OutputItem } from '../types/spss';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement } from 'chart.js';
-import { Bar, Pie, Scatter, Line } from 'react-chartjs-2';
+import { Bar, Pie, Line } from 'react-chartjs-2';
 
 // Register ChartJS modules
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement);
@@ -1398,7 +1397,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
 
     // 9. CHARTS
     if (type === 'chart') {
-      const { chartType, xVar, yVar, rows = [] } = data;
+      const { chartType, xVar, _yVar, rows = [] } = data;
 
       // Extract data for chart
       const xVals = rows.map((r: any) => r[xVar]);
@@ -1466,7 +1465,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           <div className="spss-tree-node level-0" style={{ fontWeight: 600 }}>
             <span>📁</span> Output Document
           </div>
-          {outputs.map((item, idx) => (
+          {outputs.map((item) => (
             <div key={item.id} style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Top Node */}
               <div

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Award, Cpu, Database, Check } from 'lucide-react';
+import { X, Award, Check } from 'lucide-react';
 
 interface AboutModalProps {
   isOpen: boolean;

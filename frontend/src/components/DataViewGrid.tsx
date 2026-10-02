@@ -178,7 +178,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     let parsedVal: any = editValue.trim();
 
     if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-      const num = parseFloat(parsedVal.replace(/[\$,]/g, ''));
+      const num = parseFloat(parsedVal.replace(/[$,]/g, ''));
       parsedVal = isNaN(num) ? parsedVal : num;
     }
 
@@ -225,7 +225,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               const varMeta = variables[cIdx];
               let parsed: any = cellVal.trim();
               if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-                const num = parseFloat(parsed.replace(/[\$,]/g, ''));
+                const num = parseFloat(parsed.replace(/[$,]/g, ''));
                 parsed = isNaN(num) ? parsed : num;
               }
               onCellChange(rIdx, varMeta.name, parsed);

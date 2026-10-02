@@ -9,7 +9,6 @@ import {
   Table,
   BarChart2,
   HelpCircle,
-  Settings,
   ChevronRight,
   Database,
   Sliders,
