@@ -90,11 +90,37 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     }
   }, [selectedCell.row, rows.length]);
 
+  const isMouseDownRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      isMouseDownRef.current = false;
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, []);
+
   // Handle cell selection
   const selectSingleCell = (rIdx: number, cIdx: number) => {
     setSelectedCell({ row: rIdx, col: cIdx });
     setSelectionRange({ startRow: rIdx, startCol: cIdx, endRow: rIdx, endCol: cIdx });
     setSelectionType('cell');
+  };
+
+  const handleCellMouseDown = (rIdx: number, cIdx: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only primary left-click
+    isMouseDownRef.current = true;
+    selectSingleCell(rIdx, cIdx);
+  };
+
+  const handleCellMouseEnter = (rIdx: number, cIdx: number) => {
+    if (isMouseDownRef.current) {
+      setSelectionRange((prev) => ({
+        ...prev,
+        endRow: rIdx,
+        endCol: cIdx,
+      }));
+    }
   };
 
   // Handle full row selection
@@ -505,7 +531,8 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                         className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''} ${
                           inRange && !isSelected ? 'in-selection-range' : ''
                         }`}
-                        onClick={() => selectSingleCell(rIdx, cIdx)}
+                        onMouseDown={(e) => handleCellMouseDown(rIdx, cIdx, e)}
+                        onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
                         onDoubleClick={() => startEditing(rIdx, cIdx)}
                         onContextMenu={(e) => {
                           e.preventDefault();
