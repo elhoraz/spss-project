@@ -830,11 +830,38 @@ body {
   overflow-x: auto;
 }
 
+.spss-pivot-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
 .spss-pivot-title {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 6px;
   color: var(--text-main);
+}
+
+.spss-copy-table-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-app);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: all 0.12s ease;
+}
+
+.spss-copy-table-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .spss-pivot-table {
@@ -1277,4 +1304,111 @@ body {
 .spss-grid-td.in-selection-range {
   background-color: rgba(59, 130, 246, 0.12) !important;
 }
+
+/* ==========================================================================
+   Wave 3: Sub-Dialog Modal Styles
+   ========================================================================== */
+
+.spss-subdialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  animation: fadeIn 0.12s ease-out;
+}
+
+.spss-subdialog-dialog {
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-app, #cbd5e1);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  width: 460px;
+  max-height: 85vh;
+  overflow: hidden;
+  animation: scaleUp 0.12s ease-out;
+}
+
+.spss-subdialog-fieldset {
+  border: 1px solid var(--border-app, #cbd5e1);
+  border-radius: 4px;
+  padding: 8px 12px 10px 12px;
+  margin-bottom: 10px;
+}
+
+.spss-subdialog-legend {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim, #64748b);
+  padding: 0 4px;
+}
+
+.spss-subdialog-checkbox-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.spss-subdialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg-header, #f1f5f9);
+  border-bottom: 1px solid var(--border-app, #cbd5e1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main, #1e293b);
+}
+
+.spss-subdialog-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 12px;
+}
+
+.spss-subdialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg-panel, #f8fafc);
+  border-top: 1px solid var(--border-app, #cbd5e1);
+}
+
+.spss-subdialog-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-app, #e2e8f0);
+  padding-top: 10px;
+}
+
+.spss-subdialog-btn {
+  font-size: 11px;
+  padding: 5px 8px;
+  text-align: center;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-app, #cbd5e1);
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-main, #1e293b);
+  transition: all 0.1s ease;
+}
+
+.spss-subdialog-btn:hover {
+  background: var(--accent-light, #e0eeff);
+  border-color: var(--accent, #1d4ed8);
+  color: var(--accent, #1d4ed8);
+}
+
+
 

@@ -268,6 +268,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('descriptives'))}>
                   Descriptives...
                 </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('explore'))}>
+                  Explore (Normality Tests)...
+                </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('crosstabs'))}>
                   Crosstabs (Chi-Square)...
                 </div>
@@ -321,6 +324,22 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               <div className="spss-submenu">
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('linear_regression'))}>
                   Linear & Multiple Regression...
+                </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('logistic_regression'))}>
+                  Binary Logistic Regression...
+                </div>
+              </div>
+            </div>
+
+            {/* Dimension Reduction Submenu */}
+            <div className="spss-dropdown-item">
+              <div className="spss-dropdown-item-left">
+                <Layers size={14} /> Dimension Reduction
+              </div>
+              <ChevronRight size={14} />
+              <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('factor_analysis'))}>
+                  Factor Analysis (PCA)...
                 </div>
               </div>
             </div>

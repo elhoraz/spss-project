@@ -16,6 +16,9 @@ import {
   clientComputeMannWhitney,
   clientComputeWilcoxon,
   clientComputeKruskalWallis,
+  clientComputeExplore,
+  clientComputeFactorAnalysis,
+  clientComputeLogisticRegression,
 } from '../utils/clientStats';
 
 interface SPSSAnalysisDialogsProps {
@@ -64,6 +67,72 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   const [filterCondition, setFilterCondition] = useState<string>('salary > 30000');
   const [splitVar, setSplitVar] = useState<string>('');
   const [weightVar, setWeightVar] = useState<string>('');
+
+  // Nested Sub-Dialog state
+  const [activeSubDialog, setActiveSubDialog] = useState<
+    'statistics' | 'charts' | 'options' | 'cells' | 'posthoc' | 'plots' | 'factor_options' | null
+  >(null);
+
+  // Sub-dialog options states
+  const [statsOptions, setStatsOptions] = useState({
+    mean: true,
+    stdDev: true,
+    min: true,
+    max: true,
+    variance: false,
+    range: false,
+    seMean: false,
+    median: false,
+    skewness: false,
+    kurtosis: false,
+    quartiles: false,
+  });
+
+  const [chartsOptions, setChartsOptions] = useState({
+    chartType: 'none' as 'none' | 'bar' | 'pie' | 'histogram',
+    showNormalCurve: false,
+  });
+
+  const [crosstabsOptions, setCrosstabsOptions] = useState({
+    chiSquare: true,
+    phiCramer: false,
+    observed: true,
+    expected: false,
+    rowPct: false,
+    colPct: false,
+    totalPct: false,
+  });
+
+  const [postHocOptions, setPostHocOptions] = useState({
+    tukey: true,
+    bonferroni: false,
+    scheffe: false,
+    lsd: false,
+    significanceLevel: 0.05,
+  });
+
+  const [exploreOptions, setExploreOptions] = useState({
+    descriptives: true,
+    mEstimators: false,
+    outliers: true,
+    percentiles: false,
+    stemAndLeaf: true,
+    normalityPlots: true,
+    boxplots: 'factor' as 'factor' | 'dependents' | 'none',
+  });
+
+  const [factorOptions, setFactorOptions] = useState({
+    extraction: 'pca' as 'pca' | 'pa',
+    eigenvalueCutoff: 1.0,
+    rotation: 'varimax' as 'varimax' | 'direct_oblimin' | 'quartimax' | 'none',
+    screePlot: true,
+  });
+
+  const [logisticOptions, setLogisticOptions] = useState({
+    ciLevel: 95,
+    includeConstant: true,
+    classificationCutoff: 0.5,
+  });
 
   if (!modalType || modalType === 'import_data' || modalType === 'export_report' || modalType === 'value_labels' || modalType === 'about_spss') {
     return null;
@@ -178,6 +247,17 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         const testV = depVar || targetVars[0] || 'salary';
         const grpV = factorVar || 'jobcat';
         output = clientComputeKruskalWallis(rows, testV, grpV);
+      } else if (modalType === 'explore') {
+        const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.measure === 'Scale').map((v) => v.name).slice(0, 2);
+        output = clientComputeExplore(rows, vars.length > 0 ? vars : ['salary']);
+      } else if (modalType === 'factor_analysis') {
+        const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.measure === 'Scale').map((v) => v.name).slice(0, 4);
+        output = clientComputeFactorAnalysis(rows, vars.length > 0 ? vars : ['salary', 'salbegin', 'educ']);
+      } else if (modalType === 'logistic_regression') {
+        const d = depVar || targetVars[0] || 'gender';
+        const ivs = targetVars.filter((v) => v !== d);
+        const covariates = ivs.length > 0 ? ivs : variables.filter((v) => v.measure === 'Scale').map((v) => v.name).slice(0, 3);
+        output = clientComputeLogisticRegression(rows, d, covariates);
       } else if (modalType === 'sort_cases') {
         const sortField = selectedSourceVar || targetVars[0] || variables[0]?.name;
         if (sortField) {
@@ -306,6 +386,12 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       syntax = `NPAR TESTS\n  /WILCOXON= ${targetVars[0] || 'salary'} WITH ${targetVars[1] || 'salbegin'} (PAIRED)\n  /MISSING ANALYSIS.`;
     } else if (modalType === 'kruskal_wallis') {
       syntax = `NPAR TESTS\n  /K-W= ${depVar || targetVars[0] || 'salary'} BY ${factorVar || 'jobcat'}\n  /MISSING ANALYSIS.`;
+    } else if (modalType === 'explore') {
+      syntax = `EXAMINE VARIABLES=${(targetVars.length > 0 ? targetVars : ['salary']).join(' ')}\n  /PLOT NPPLOT STEMLEAF\n  /STATISTICS DESCRIPTIVES EXTREME(5).`;
+    } else if (modalType === 'factor_analysis') {
+      syntax = `FACTOR\n  /VARIABLES ${(targetVars.length > 0 ? targetVars : ['salary', 'salbegin', 'educ']).join(' ')}\n  /EXTRACTION PC\n  /CRITERIA MINEIGEN(${factorOptions.eigenvalueCutoff})\n  /ROTATION ${factorOptions.rotation.toUpperCase()}\n  /METHOD=CORRELATION.`;
+    } else if (modalType === 'logistic_regression') {
+      syntax = `LOGISTIC REGRESSION VARIABLES ${depVar || 'gender'}\n  /METHOD=ENTER ${targetVars.join(' ')}\n  /CRITERIA=PIN(.05) POUT(.10) ITERATE(20) CUT(${logisticOptions.classificationCutoff})\n  /PRINT=GOODFIT CI(${logisticOptions.ciLevel}).`;
     } else if (modalType === 'sort_cases') {
       syntax = `SORT CASES BY ${targetVars[0] || variables[0]?.name} (${sortOrder === 'A' ? 'A' : 'D'}).`;
     } else if (modalType === 'select_cases') {
@@ -323,6 +409,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   const dialogTitles: Record<string, string> = {
     frequencies: 'Frequencies',
     descriptives: 'Descriptives',
+    explore: 'Explore (Normality Tests & Outliers)',
     crosstabs: 'Crosstabs',
     correlations: 'Bivariate Correlations',
     one_sample_t_test: 'One-Sample T Test',
@@ -331,6 +418,8 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     one_way_anova: 'One-Way ANOVA',
     two_way_anova: 'Univariate ANOVA (Two-Way)',
     linear_regression: 'Linear Regression',
+    logistic_regression: 'Binary Logistic Regression',
+    factor_analysis: 'Factor Analysis (PCA)',
     reliability: 'Reliability Analysis (Cronbach\'s Alpha)',
     mann_whitney: 'Two-Independent-Samples Tests (Mann-Whitney U)',
     wilcoxon: 'Two-Related-Samples Tests (Wilcoxon)',
@@ -598,6 +687,68 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   />
                 </div>
               </div>
+            ) : modalType === 'explore' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Dependent List:</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.map((tv) => (
+                      <div
+                        key={tv}
+                        className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                        onClick={() => setSelectedTargetVar(tv)}
+                        onDoubleClick={handleMoveToSource}
+                      >
+                        {tv}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Factor List (Optional):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- None (Univariate) --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : modalType === 'logistic_regression' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Dependent (Binary):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Binary Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Covariates:</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.map((tv) => (
+                      <div
+                        key={tv}
+                        className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                        onClick={() => setSelectedTargetVar(tv)}
+                        onDoubleClick={handleMoveToSource}
+                      >
+                        {tv}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             ) : modalType === 'sort_cases' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <span className="spss-picker-label">Sort by:</span>
@@ -773,9 +924,530 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
             <button className="spss-btn" onClick={onClose}>
               Cancel
             </button>
+            <button
+              className="spss-btn"
+              onClick={() => alert('SPSS Command Help: Refer to IBM SPSS Statistics 29.0 Core System User\'s Guide.')}
+            >
+              Help
+            </button>
+
+            {/* Sub-Dialog Triggers */}
+            {modalType === 'frequencies' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('statistics')}>Statistics...</button>
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('charts')}>Charts...</button>
+              </div>
+            )}
+            {modalType === 'descriptives' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
+            {modalType === 'explore' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('statistics')}>Statistics...</button>
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('plots')}>Plots...</button>
+              </div>
+            )}
+            {modalType === 'crosstabs' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('statistics')}>Statistics...</button>
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('cells')}>Cells...</button>
+              </div>
+            )}
+            {modalType === 'one_way_anova' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('posthoc')}>Post Hoc...</button>
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
+            {modalType === 'two_way_anova' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
+            {modalType === 'linear_regression' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('statistics')}>Statistics...</button>
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
+            {modalType === 'factor_analysis' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('factor_options')}>Extraction & Rotation...</button>
+              </div>
+            )}
+            {modalType === 'logistic_regression' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Nested Sub-Dialog Modal */}
+      {activeSubDialog && (
+        <div className="spss-subdialog-overlay" onClick={() => setActiveSubDialog(null)}>
+          <div className="spss-subdialog-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="spss-subdialog-header">
+              <span>
+                {activeSubDialog === 'statistics' && `${dialogTitles[modalType] || 'Analysis'}: Statistics`}
+                {activeSubDialog === 'charts' && `${dialogTitles[modalType] || 'Analysis'}: Charts`}
+                {activeSubDialog === 'options' && `${dialogTitles[modalType] || 'Analysis'}: Options`}
+                {activeSubDialog === 'cells' && `${dialogTitles[modalType] || 'Analysis'}: Cell Display`}
+                {activeSubDialog === 'posthoc' && 'One-Way ANOVA: Post Hoc Multiple Comparisons'}
+                {activeSubDialog === 'plots' && 'Explore: Plots'}
+                {activeSubDialog === 'factor_options' && 'Factor Analysis: Extraction & Rotation'}
+              </span>
+              <button className="spss-modal-close-btn" onClick={() => setActiveSubDialog(null)}>
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="spss-subdialog-body">
+              {activeSubDialog === 'statistics' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Central Tendency</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.mean}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, mean: e.target.checked })}
+                        /> Mean
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.median}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, median: e.target.checked })}
+                        /> Median
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Dispersion</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.stdDev}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, stdDev: e.target.checked })}
+                        /> Std. deviation
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.variance}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, variance: e.target.checked })}
+                        /> Variance
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.range}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, range: e.target.checked })}
+                        /> Range
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.min}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, min: e.target.checked })}
+                        /> Minimum
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.max}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, max: e.target.checked })}
+                        /> Maximum
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.seMean}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, seMean: e.target.checked })}
+                        /> S.E. mean
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Distribution</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.skewness}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, skewness: e.target.checked })}
+                        /> Skewness
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.kurtosis}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, kurtosis: e.target.checked })}
+                        /> Kurtosis
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Percentile Values</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={statsOptions.quartiles}
+                          onChange={(e) => setStatsOptions({ ...statsOptions, quartiles: e.target.checked })}
+                        /> Quartiles
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+
+              {activeSubDialog === 'charts' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Chart Type</legend>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="subChartType"
+                          checked={chartsOptions.chartType === 'none'}
+                          onChange={() => setChartsOptions({ ...chartsOptions, chartType: 'none' })}
+                        /> None
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="subChartType"
+                          checked={chartsOptions.chartType === 'bar'}
+                          onChange={() => setChartsOptions({ ...chartsOptions, chartType: 'bar' })}
+                        /> Bar charts
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="subChartType"
+                          checked={chartsOptions.chartType === 'pie'}
+                          onChange={() => setChartsOptions({ ...chartsOptions, chartType: 'pie' })}
+                        /> Pie charts
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="subChartType"
+                          checked={chartsOptions.chartType === 'histogram'}
+                          onChange={() => setChartsOptions({ ...chartsOptions, chartType: 'histogram' })}
+                        /> Histograms
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  {chartsOptions.chartType === 'histogram' && (
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Chart Options</legend>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={chartsOptions.showNormalCurve}
+                          onChange={(e) => setChartsOptions({ ...chartsOptions, showNormalCurve: e.target.checked })}
+                        /> Show normal curve on histogram
+                      </label>
+                    </fieldset>
+                  )}
+                </div>
+              )}
+
+              {activeSubDialog === 'options' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Display Order</legend>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="displayOrder" defaultChecked /> Variable list
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="displayOrder" /> Alphabetic
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="displayOrder" /> Ascending means
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="displayOrder" /> Descending means
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Missing Values</legend>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="missingValues" defaultChecked /> Exclude cases listwise
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input type="radio" name="missingValues" /> Exclude cases pairwise
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+
+              {activeSubDialog === 'cells' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Counts</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={crosstabsOptions.observed}
+                          onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, observed: e.target.checked })}
+                        /> Observed
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={crosstabsOptions.expected}
+                          onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, expected: e.target.checked })}
+                        /> Expected
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Percentages</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={crosstabsOptions.rowPct}
+                          onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, rowPct: e.target.checked })}
+                        /> Row
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={crosstabsOptions.colPct}
+                          onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, colPct: e.target.checked })}
+                        /> Column
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={crosstabsOptions.totalPct}
+                          onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, totalPct: e.target.checked })}
+                        /> Total
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+
+              {activeSubDialog === 'posthoc' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Equal Variances Assumed</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={postHocOptions.tukey}
+                          onChange={(e) => setPostHocOptions({ ...postHocOptions, tukey: e.target.checked })}
+                        /> Tukey (HSD)
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={postHocOptions.bonferroni}
+                          onChange={(e) => setPostHocOptions({ ...postHocOptions, bonferroni: e.target.checked })}
+                        /> Bonferroni
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={postHocOptions.scheffe}
+                          onChange={(e) => setPostHocOptions({ ...postHocOptions, scheffe: e.target.checked })}
+                        /> Scheffe
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={postHocOptions.lsd}
+                          onChange={(e) => setPostHocOptions({ ...postHocOptions, lsd: e.target.checked })}
+                        /> LSD (Equal Variances)
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="spss-picker-label">Significance level:</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="spss-text-input"
+                      style={{ width: 70 }}
+                      value={postHocOptions.significanceLevel}
+                      onChange={(e) => setPostHocOptions({ ...postHocOptions, significanceLevel: parseFloat(e.target.value) || 0.05 })}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {activeSubDialog === 'plots' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Boxplots</legend>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="boxplots"
+                          checked={exploreOptions.boxplots === 'factor'}
+                          onChange={() => setExploreOptions({ ...exploreOptions, boxplots: 'factor' })}
+                        /> Factor levels together
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="boxplots"
+                          checked={exploreOptions.boxplots === 'dependents'}
+                          onChange={() => setExploreOptions({ ...exploreOptions, boxplots: 'dependents' })}
+                        /> Dependents together
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="boxplots"
+                          checked={exploreOptions.boxplots === 'none'}
+                          onChange={() => setExploreOptions({ ...exploreOptions, boxplots: 'none' })}
+                        /> None
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Descriptive</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={exploreOptions.stemAndLeaf}
+                          onChange={(e) => setExploreOptions({ ...exploreOptions, stemAndLeaf: e.target.checked })}
+                        /> Stem-and-leaf
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={exploreOptions.normalityPlots}
+                          onChange={(e) => setExploreOptions({ ...exploreOptions, normalityPlots: e.target.checked })}
+                        /> Normality plots with tests
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+              )}
+
+              {activeSubDialog === 'factor_options' && (
+                <div>
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Extraction Method</legend>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorExtraction"
+                          checked={factorOptions.extraction === 'pca'}
+                          onChange={() => setFactorOptions({ ...factorOptions, extraction: 'pca' })}
+                        /> Principal components (PCA)
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorExtraction"
+                          checked={factorOptions.extraction === 'pa'}
+                          onChange={() => setFactorOptions({ ...factorOptions, extraction: 'pa' })}
+                        /> Principal axis factoring
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Rotation Method</legend>
+                    <div className="spss-subdialog-checkbox-grid">
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorRotation"
+                          checked={factorOptions.rotation === 'varimax'}
+                          onChange={() => setFactorOptions({ ...factorOptions, rotation: 'varimax' })}
+                        /> Varimax (Orthogonal)
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorRotation"
+                          checked={factorOptions.rotation === 'direct_oblimin'}
+                          onChange={() => setFactorOptions({ ...factorOptions, rotation: 'direct_oblimin' })}
+                        /> Direct Oblimin (Oblique)
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorRotation"
+                          checked={factorOptions.rotation === 'quartimax'}
+                          onChange={() => setFactorOptions({ ...factorOptions, rotation: 'quartimax' })}
+                        /> Quartimax
+                      </label>
+                      <label className="spss-checkbox-label">
+                        <input
+                          type="radio"
+                          name="factorRotation"
+                          checked={factorOptions.rotation === 'none'}
+                          onChange={() => setFactorOptions({ ...factorOptions, rotation: 'none' })}
+                        /> None
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset className="spss-subdialog-fieldset">
+                    <legend className="spss-subdialog-legend">Display</legend>
+                    <label className="spss-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={factorOptions.screePlot}
+                        onChange={(e) => setFactorOptions({ ...factorOptions, screePlot: e.target.checked })}
+                      /> Scree plot
+                    </label>
+                  </fieldset>
+                </div>
+              )}
+            </div>
+
+            <div className="spss-subdialog-footer">
+              <button className="spss-btn spss-btn-primary" onClick={() => setActiveSubDialog(null)}>
+                Continue
+              </button>
+              <button className="spss-btn" onClick={() => setActiveSubDialog(null)}>
+                Cancel
+              </button>
+              <button
+                className="spss-btn"
+                onClick={() => alert('Refer to IBM SPSS Statistics Command Syntax Reference for statistical options.')}
+              >
+                Help
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

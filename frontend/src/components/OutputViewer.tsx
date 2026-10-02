@@ -880,7 +880,498 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       );
     }
 
-    // 8.6 DATA MANAGEMENT LOG
+    // 8.6 EXPLORE & NORMALITY TESTS
+    if (type === 'explore') {
+      const results = data.results || {};
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {Object.entries(results).map(([varName, vData]: [string, any], idx: number) => (
+            <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Case Processing Summary */}
+              <div className="spss-pivot-table-wrapper">
+                <div className="spss-pivot-title">Case Processing Summary - {varName}</div>
+                <table className="spss-pivot-table">
+                  <thead>
+                    <tr>
+                      <th className="align-left" rowSpan={2}>Variable</th>
+                      <th colSpan={2}>Valid</th>
+                      <th colSpan={2}>Missing</th>
+                      <th colSpan={2}>Total</th>
+                    </tr>
+                    <tr>
+                      <th>N</th>
+                      <th>Percent</th>
+                      <th>N</th>
+                      <th>Percent</th>
+                      <th>N</th>
+                      <th>Percent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{varName}</td>
+                      <td>{vData.case_processing?.valid_n}</td>
+                      <td>{vData.case_processing?.valid_percent}%</td>
+                      <td>{vData.case_processing?.missing_n}</td>
+                      <td>{vData.case_processing?.missing_percent}%</td>
+                      <td>{vData.case_processing?.total_n}</td>
+                      <td>100.0%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Descriptives Table */}
+              <div className="spss-pivot-table-wrapper">
+                <div className="spss-pivot-title">Descriptives - {varName}</div>
+                <table className="spss-pivot-table" style={{ maxWidth: 520 }}>
+                  <thead>
+                    <tr>
+                      <th className="align-left">Statistic</th>
+                      <th>Estimate</th>
+                      <th>Std. Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="align-left" style={{ fontWeight: 600 }}>Mean</td>
+                      <td>{vData.descriptives?.mean}</td>
+                      <td>{vData.descriptives?.se_mean}</td>
+                    </tr>
+                    <tr>
+                      <td className="align-left" style={{ paddingLeft: 16 }}>95% Confidence Interval for Mean: Lower Bound</td>
+                      <td>{vData.descriptives?.ci_95_lower}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left" style={{ paddingLeft: 16 }}>Upper Bound</td>
+                      <td>{vData.descriptives?.ci_95_upper}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">5% Trimmed Mean</td>
+                      <td>{vData.descriptives?.trimmed_mean_5pct}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Median</td>
+                      <td>{vData.descriptives?.median}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Variance</td>
+                      <td>{vData.descriptives?.variance}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Std. Deviation</td>
+                      <td>{vData.descriptives?.std_deviation}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Minimum</td>
+                      <td>{vData.descriptives?.minimum}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Maximum</td>
+                      <td>{vData.descriptives?.maximum}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Range</td>
+                      <td>{vData.descriptives?.range}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Interquartile Range</td>
+                      <td>{vData.descriptives?.interquartile_range}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Skewness</td>
+                      <td>{vData.descriptives?.skewness}</td>
+                      <td>{vData.descriptives?.se_skewness || ''}</td>
+                    </tr>
+                    <tr>
+                      <td className="align-left">Kurtosis</td>
+                      <td>{vData.descriptives?.kurtosis}</td>
+                      <td>{vData.descriptives?.se_kurtosis || ''}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Tests of Normality */}
+              <div className="spss-pivot-table-wrapper">
+                <div className="spss-pivot-title">Tests of Normality - {varName}</div>
+                <table className="spss-pivot-table" style={{ maxWidth: 520 }}>
+                  <thead>
+                    <tr>
+                      <th className="align-left" rowSpan={2}>Variable</th>
+                      <th colSpan={3}>Kolmogorov-Smirnov<sup>a</sup></th>
+                      <th colSpan={3}>Shapiro-Wilk</th>
+                    </tr>
+                    <tr>
+                      <th>Statistic</th>
+                      <th>df</th>
+                      <th>Sig.</th>
+                      <th>Statistic</th>
+                      <th>df</th>
+                      <th>Sig.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{varName}</td>
+                      <td>{vData.tests_of_normality?.kolmogorov_smirnov?.statistic}</td>
+                      <td>{vData.tests_of_normality?.kolmogorov_smirnov?.df}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                        {vData.tests_of_normality?.kolmogorov_smirnov?.sig}
+                      </td>
+                      <td>{vData.tests_of_normality?.shapiro_wilk?.statistic}</td>
+                      <td>{vData.tests_of_normality?.shapiro_wilk?.df}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                        {vData.tests_of_normality?.shapiro_wilk?.sig}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="spss-pivot-notes">a. Lilliefors Significance Correction</div>
+              </div>
+
+              {/* Extreme Values */}
+              <div className="spss-pivot-table-wrapper">
+                <div className="spss-pivot-title">Extreme Values - {varName}</div>
+                <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+                  <thead>
+                    <tr>
+                      <th className="align-left">Category</th>
+                      <th>Rank</th>
+                      <th>Case Number</th>
+                      <th>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vData.extreme_values?.highest?.map((h: any, i: number) => (
+                      <tr key={`h-${i}`}>
+                        {i === 0 && (
+                          <td className="align-left" rowSpan={5} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                            Highest
+                          </td>
+                        )}
+                        <td>{h.rank}</td>
+                        <td>{h.case_number}</td>
+                        <td>{h.value?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    {vData.extreme_values?.lowest?.map((l: any, i: number) => (
+                      <tr key={`l-${i}`}>
+                        {i === 0 && (
+                          <td className="align-left" rowSpan={5} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                            Lowest
+                          </td>
+                        )}
+                        <td>{l.rank}</td>
+                        <td>{l.case_number}</td>
+                        <td>{l.value?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // 8.7 FACTOR ANALYSIS
+    if (type === 'factor_analysis') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* KMO and Bartlett's Test */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">KMO and Bartlett's Test</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 460 }}>
+              <tbody>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>
+                    Kaiser-Meyer-Olkin Measure of Sampling Adequacy
+                  </td>
+                  <td style={{ fontWeight: 700 }}>{data.kmo_and_bartlett?.kmo_measure}</td>
+                </tr>
+                <tr>
+                  <td className="align-left">Bartlett's Test of Sphericity: Approx. Chi-Square</td>
+                  <td>{data.kmo_and_bartlett?.bartlett_approx_chi_square}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ paddingLeft: 24 }}>df</td>
+                  <td>{data.kmo_and_bartlett?.bartlett_df}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ paddingLeft: 24 }}>Sig.</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                    {data.kmo_and_bartlett?.bartlett_sig}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Communalities Table */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Communalities</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 360 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  <th>Initial</th>
+                  <th>Extraction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.communalities?.map((c: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{c.variable}</td>
+                    <td>{c.initial?.toFixed(3)}</td>
+                    <td style={{ fontWeight: 700 }}>{c.extraction}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">Extraction Method: Principal Component Analysis.</div>
+          </div>
+
+          {/* Total Variance Explained */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Total Variance Explained</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 520 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Component</th>
+                  <th>Initial Eigenvalues Total</th>
+                  <th>% of Variance</th>
+                  <th>Cumulative %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.total_variance_explained?.map((ve: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{ve.component}</td>
+                    <td style={{ fontWeight: ve.eigenvalue >= 1.0 ? 700 : 400 }}>{ve.eigenvalue}</td>
+                    <td>{ve.percent_of_variance}%</td>
+                    <td style={{ fontWeight: 700 }}>{ve.cumulative_percent}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Rotated Component Matrix */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Rotated Component Matrix<sup>a</sup></div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  {Object.keys(data.rotated_component_matrix?.[0] || {})
+                    .filter((k) => k !== 'variable')
+                    .map((compKey, kIdx) => (
+                      <th key={kIdx}>{compKey}</th>
+                    ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.rotated_component_matrix?.map((row: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{row.variable}</td>
+                    {Object.keys(row)
+                      .filter((k) => k !== 'variable')
+                      .map((compKey, kIdx) => (
+                        <td key={kIdx} style={{ fontWeight: Math.abs(row[compKey]) >= 0.5 ? 700 : 400 }}>
+                          {row[compKey]}
+                        </td>
+                      ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">
+              Extraction Method: Principal Component Analysis. Rotation Method: Varimax with Kaiser Normalization.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 8.8 BINARY LOGISTIC REGRESSION
+    if (type === 'logistic_regression') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Dependent Variable Encoding */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Dependent Variable Encoding</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 360 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Original Value</th>
+                  <th>Internal Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.dependent_encoding?.map((enc: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{enc.original_value}</td>
+                    <td>{enc.internal_value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Omnibus Tests */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Omnibus Tests of Model Coefficients</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Step 1</th>
+                  <th>Chi-square</th>
+                  <th>df</th>
+                  <th>Sig.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left">Step</td>
+                  <td>{data.omnibus_tests?.chi_square}</td>
+                  <td>{data.omnibus_tests?.df}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.omnibus_tests?.sig}</td>
+                </tr>
+                <tr>
+                  <td className="align-left">Block</td>
+                  <td>{data.omnibus_tests?.chi_square}</td>
+                  <td>{data.omnibus_tests?.df}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.omnibus_tests?.sig}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>Model</td>
+                  <td style={{ fontWeight: 700 }}>{data.omnibus_tests?.chi_square}</td>
+                  <td>{data.omnibus_tests?.df}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.omnibus_tests?.sig}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Model Summary */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Model Summary</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th>-2 Log likelihood</th>
+                  <th>Cox & Snell R Square</th>
+                  <th>Nagelkerke R Square</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td>{data.model_summary?.minus_2_log_likelihood}</td>
+                  <td>{data.model_summary?.cox_snell_r2}</td>
+                  <td style={{ fontWeight: 700 }}>{data.model_summary?.nagelkerke_r2}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Classification Table */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Classification Table<sup>a</sup></div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left" rowSpan={3}>Observed</th>
+                  <th colSpan={3}>Predicted</th>
+                </tr>
+                <tr>
+                  <th colSpan={2}>{data.dependent_variable}</th>
+                  <th rowSpan={2}>Percentage Correct</th>
+                </tr>
+                <tr>
+                  <th>{data.classification_table?.group_0_label}</th>
+                  <th>{data.classification_table?.group_1_label}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>{data.classification_table?.group_0_label}</td>
+                  <td>{data.classification_table?.n00}</td>
+                  <td>{data.classification_table?.n01}</td>
+                  <td>{data.classification_table?.percent_correct_0}%</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>{data.classification_table?.group_1_label}</td>
+                  <td>{data.classification_table?.n10}</td>
+                  <td>{data.classification_table?.n11}</td>
+                  <td>{data.classification_table?.percent_correct_1}%</td>
+                </tr>
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left" style={{ fontWeight: 700 }}>Overall Percentage</td>
+                  <td></td>
+                  <td></td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                    {data.classification_table?.overall_percent}%
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">a. The cut value is .500</div>
+          </div>
+
+          {/* Variables in the Equation */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Variables in the Equation</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  <th>B</th>
+                  <th>S.E.</th>
+                  <th>Wald</th>
+                  <th>df</th>
+                  <th>Sig.</th>
+                  <th>Exp(B)</th>
+                  <th>95% C.I. for EXP(B) Lower</th>
+                  <th>Upper</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.variables_in_equation?.map((row: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{row.variable}</td>
+                    <td>{row.b}</td>
+                    <td>{row.se}</td>
+                    <td>{row.wald}</td>
+                    <td>{row.df}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{row.sig}</td>
+                    <td style={{ fontWeight: 700 }}>{row.exp_b}</td>
+                    <td>{row.ci_lower}</td>
+                    <td>{row.ci_upper}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">a. Variable(s) entered on step 1: {data.covariates?.join(', ')}.</div>
+          </div>
+        </div>
+      );
+    }
+
+    // 8.9 DATA MANAGEMENT LOG
     if (type === 'data_management') {
       return (
         <div className="spss-pivot-table-wrapper">

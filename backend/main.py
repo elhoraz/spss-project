@@ -24,6 +24,9 @@ from .stats_engine.anova import compute_one_way_anova
 from .stats_engine.regression import compute_linear_regression
 from .stats_engine.reliability import compute_cronbach_alpha
 from .stats_engine.non_parametrics import compute_mann_whitney_u, compute_wilcoxon_signed_rank, compute_kruskal_wallis
+from .stats_engine.explore import compute_explore
+from .stats_engine.factor_analysis import compute_factor_analysis
+from .stats_engine.logistic_regression import compute_binary_logistic_regression
 from .stats_engine.syntax_parser import parse_and_execute_syntax
 from .sample_data import get_employee_sample_data, get_medical_sample_data
 from .security import hash_password, verify_password, create_access_token, create_refresh_token, decode_token, get_current_user_token
@@ -285,6 +288,35 @@ def run_nonparametric(req: Dict[str, Any]):
             return compute_kruskal_wallis(data, req["test_variable"], req["group_variable"])
         else:
             raise HTTPException(status_code=400, detail="Unsupported non-parametric test.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/analyze/explore")
+def run_explore(req: Dict[str, Any]):
+    try:
+        data = req.get("data", [])
+        variables = req.get("variables", [])
+        return compute_explore(data, variables)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/analyze/factor")
+def run_factor(req: Dict[str, Any]):
+    try:
+        data = req.get("data", [])
+        variables = req.get("variables", [])
+        n_factors = req.get("n_factors", None)
+        return compute_factor_analysis(data, variables, n_factors)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/analyze/logistic-regression")
+def run_logistic_regression(req: Dict[str, Any]):
+    try:
+        data = req.get("data", [])
+        dep_var = req.get("dependent_variable")
+        covariates = req.get("covariates", [])
+        return compute_binary_logistic_regression(data, dep_var, covariates)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

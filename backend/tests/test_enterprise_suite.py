@@ -20,6 +20,9 @@ from backend.stats_engine.non_parametrics import (
     compute_wilcoxon_signed_rank,
     compute_kruskal_wallis,
 )
+from backend.stats_engine.explore import compute_explore
+from backend.stats_engine.factor_analysis import compute_factor_analysis
+from backend.stats_engine.logistic_regression import compute_binary_logistic_regression
 from backend.stats_engine.syntax_parser import parse_and_execute_syntax
 from backend.security import get_password_hash, verify_password, create_access_token, decode_token
 
@@ -202,3 +205,35 @@ def test_fastapi_endpoints():
     openapi_res = client.get("/openapi.json")
     assert openapi_res.status_code == 200
     assert "paths" in openapi_res.json()
+
+# 13. EXPLORE & NORMALITY TESTS
+def test_explore_procedure(employee_data):
+    res = compute_explore(employee_data, ["salary"])
+    assert res["title"] == "Explore (Tests of Normality & Extremes)"
+    sal_res = res["results"]["salary"]
+    assert sal_res["case_processing"]["valid_n"] == 40
+    assert "tests_of_normality" in sal_res
+    assert "shapiro_wilk" in sal_res["tests_of_normality"]
+    assert "kolmogorov_smirnov" in sal_res["tests_of_normality"]
+    assert len(sal_res["extreme_values"]["highest"]) == 5
+    assert len(sal_res["extreme_values"]["lowest"]) == 5
+
+# 14. FACTOR ANALYSIS (PCA & VARIMAX)
+def test_factor_analysis(employee_data):
+    res = compute_factor_analysis(employee_data, ["salary", "salbegin", "educ"])
+    assert res["title"] == "Factor Analysis (Principal Component Analysis)"
+    assert "kmo_and_bartlett" in res
+    assert res["kmo_and_bartlett"]["kmo_measure"] > 0
+    assert len(res["communalities"]) == 3
+    assert len(res["total_variance_explained"]) == 3
+    assert len(res["rotated_component_matrix"]) == 3
+
+# 15. BINARY LOGISTIC REGRESSION
+def test_logistic_regression(employee_data):
+    res = compute_binary_logistic_regression(employee_data, "gender", ["salary", "educ"])
+    assert res["title"] == "Binary Logistic Regression"
+    assert "omnibus_tests" in res
+    assert "model_summary" in res
+    assert "classification_table" in res
+    assert len(res["variables_in_equation"]) == 3  # Constant + salary + educ
+
