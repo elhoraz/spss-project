@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { VariableMeta, VariableType, VariableAlign, VariableMeasure, VariableRole } from '../types/spss';
 import { Trash2, Plus } from 'lucide-react';
+import { VariableTypeModal } from './VariableTypeModal';
+import { MissingValuesModal } from './MissingValuesModal';
 
 interface VariableViewGridProps {
   variables: VariableMeta[];
@@ -17,6 +19,9 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
   onAddVariable,
   onDeleteVariable,
 }) => {
+  const [selectedTypeVarIdx, setSelectedTypeVarIdx] = useState<number | null>(null);
+  const [selectedMissingVarIdx, setSelectedMissingVarIdx] = useState<number | null>(null);
+
   const formatValuesSummary = (v: VariableMeta) => {
     const keys = Object.keys(v.values || {});
     if (keys.length === 0) return '{None}';
@@ -61,16 +66,16 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
 
               {/* 2. Type */}
               <td className="spss-varview-td">
-                <select
-                  className="spss-varview-select"
-                  value={v.type}
-                  onChange={(e) => onUpdateVariable(idx, { type: e.target.value as VariableType })}
+                <button
+                  className="spss-ellipsis-btn"
+                  onClick={() => setSelectedTypeVarIdx(idx)}
+                  title="Define Variable Type"
                 >
-                  <option value="Numeric">Numeric</option>
-                  <option value="String">String</option>
-                  <option value="Date">Date</option>
-                  <option value="Dollar">Dollar</option>
-                </select>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.type}
+                  </span>
+                  <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
+                </button>
               </td>
 
               {/* 3. Width */}
@@ -122,11 +127,16 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
 
               {/* 7. Missing */}
               <td className="spss-varview-td">
-                <input
-                  className="spss-varview-input"
-                  value={v.missing}
-                  onChange={(e) => onUpdateVariable(idx, { missing: e.target.value })}
-                />
+                <button
+                  className="spss-ellipsis-btn"
+                  onClick={() => setSelectedMissingVarIdx(idx)}
+                  title="Define Missing Values"
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {v.missing || 'None'}
+                  </span>
+                  <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
+                </button>
               </td>
 
               {/* 8. Columns */}
@@ -207,6 +217,24 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
           </tr>
         </tbody>
       </table>
+
+      {/* Variable Type Modal */}
+      {selectedTypeVarIdx !== null && variables[selectedTypeVarIdx] && (
+        <VariableTypeModal
+          variable={variables[selectedTypeVarIdx]}
+          onClose={() => setSelectedTypeVarIdx(null)}
+          onSave={(updated) => onUpdateVariable(selectedTypeVarIdx, updated)}
+        />
+      )}
+
+      {/* Missing Values Modal */}
+      {selectedMissingVarIdx !== null && variables[selectedMissingVarIdx] && (
+        <MissingValuesModal
+          variable={variables[selectedMissingVarIdx]}
+          onClose={() => setSelectedMissingVarIdx(null)}
+          onSave={(missingDef) => onUpdateVariable(selectedMissingVarIdx, { missing: missingDef })}
+        />
+      )}
     </div>
   );
 };

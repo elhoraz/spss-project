@@ -558,6 +558,52 @@ body {
   font-weight: 600;
 }
 
+/* SPSS Filtered Case (diagonal strikethrough across case number) */
+.spss-grid-row-header.filtered-case {
+  text-decoration: line-through;
+  color: var(--text-dim);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    rgba(239, 68, 68, 0.25) 5px,
+    rgba(239, 68, 68, 0.25) 7px
+  );
+}
+
+/* Column Header Resizer Handle */
+.spss-grid-th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  position: relative;
+}
+
+.spss-th-resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+  z-index: 15;
+}
+
+.spss-th-resizer:hover,
+.spss-th-resizer.resizing {
+  background-color: var(--accent);
+  opacity: 0.8;
+}
+
+/* System-missing value in SPSS format */
+.spss-grid-td.system-missing {
+  color: var(--text-dim);
+  font-weight: 600;
+  user-select: none;
+}
+
 /* Data Cells */
 .spss-grid-td {
   border-right: 1px solid var(--border-cell);

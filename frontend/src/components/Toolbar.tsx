@@ -32,6 +32,10 @@ interface ToolbarProps {
   onSelectSampleDataset: (name: string) => void;
   onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
   onNewData: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -46,6 +50,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onSelectSampleDataset,
   onExport,
   onNewData,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }) => {
   return (
     <div className="spss-toolbar">
@@ -89,10 +97,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <div className="spss-toolbar-separator" />
 
         {/* Undo / Redo */}
-        <button className="spss-toolbar-btn" title="Undo (Ctrl+Z)">
+        <button
+          className={`spss-toolbar-btn ${!canUndo ? 'disabled' : ''}`}
+          title="Undo (Ctrl+Z)"
+          disabled={!canUndo}
+          onClick={onUndo}
+        >
           <Undo2 size={16} />
         </button>
-        <button className="spss-toolbar-btn" title="Redo (Ctrl+Y)">
+        <button
+          className={`spss-toolbar-btn ${!canRedo ? 'disabled' : ''}`}
+          title="Redo (Ctrl+Y)"
+          disabled={!canRedo}
+          onClick={onRedo}
+        >
           <Redo2 size={16} />
         </button>
 

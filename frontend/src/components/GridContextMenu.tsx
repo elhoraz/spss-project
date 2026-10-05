@@ -23,6 +23,8 @@ export interface GridContextMenuProps {
   onClear: () => void;
   onInsertVariable: () => void;
   onInsertCases: () => void;
+  onDeleteRow?: () => void;
+  onDeleteCol?: () => void;
   onSortAscending: () => void;
   onSortDescending: () => void;
   onDescriptives: () => void;
@@ -41,6 +43,8 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
   onClear,
   onInsertVariable,
   onInsertCases,
+  onDeleteRow,
+  onDeleteCol,
   onSortAscending,
   onSortDescending,
   onDescriptives,
@@ -143,9 +147,7 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         <span className="spss-context-shortcut">Delete</span>
       </button>
 
-      <div className="spss-context-separator" />
-
-      {/* Structural Insert Actions */}
+      {/* Structural Insert & Delete Actions */}
       <button
         className="spss-context-item"
         onClick={() => {
@@ -167,6 +169,34 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         <PlusCircle size={14} className="spss-context-icon" />
         <span className="spss-context-label">Insert Cases</span>
       </button>
+
+      {type === 'row' && onDeleteRow && (
+        <button
+          className="spss-context-item"
+          style={{ color: 'var(--danger)' }}
+          onClick={() => {
+            onDeleteRow();
+            onClose();
+          }}
+        >
+          <Trash2 size={14} className="spss-context-icon" />
+          <span className="spss-context-label">Delete Case</span>
+        </button>
+      )}
+
+      {type === 'col' && onDeleteCol && (
+        <button
+          className="spss-context-item"
+          style={{ color: 'var(--danger)' }}
+          onClick={() => {
+            onDeleteCol();
+            onClose();
+          }}
+        >
+          <Trash2 size={14} className="spss-context-icon" />
+          <span className="spss-context-label">Delete Variable</span>
+        </button>
+      )}
 
       <div className="spss-context-separator" />
 

@@ -28,10 +28,14 @@ interface DataViewGridProps {
   onAddVariable: () => void;
   onInsertRow?: (beforeIndex: number) => void;
   onInsertVariable?: (beforeIndex: number) => void;
+  onDeleteRow?: (rowIndex: number) => void;
+  onDeleteVariable?: (varName: string) => void;
+  onResizeColumn?: (varName: string, newWidthPx: number) => void;
   onClearCells?: (range: SelectionRange) => void;
   onSortCases?: (varName: string, ascending: boolean) => void;
   onQuickDescriptives?: (varName: string) => void;
   onSwitchToVariableView: (varName?: string) => void;
+  focusTarget?: { row: number; col?: number; timestamp: number } | null;
 }
 
 export const DataViewGrid: React.FC<DataViewGridProps> = ({
@@ -44,10 +48,14 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   onAddVariable,
   onInsertRow,
   onInsertVariable,
+  onDeleteRow,
+  onDeleteVariable,
+  onResizeColumn,
   onClearCells,
   onSortCases,
   onQuickDescriptives,
   onSwitchToVariableView,
+  focusTarget,
 }) => {
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
   const [selectionRange, setSelectionRange] = useState<SelectionRange>({
@@ -60,6 +68,8 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [customColWidths, setCustomColWidths] = useState<Record<string, number>>({});
+  const [resizingCol, setResizingCol] = useState<{ colIdx: number; startX: number; startWidth: number } | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,6 +105,47 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     }
   }, [selectedCell.row, displayRowCount]);
 
+  // Handle external focus target (e.g. from Go to Case or Find & Replace)
+  useEffect(() => {
+    if (focusTarget) {
+      const targetRow = Math.max(0, Math.min(displayRowCount - 1, focusTarget.row));
+      const targetCol = focusTarget.col !== undefined ? Math.max(0, Math.min(variables.length - 1, focusTarget.col)) : selectedCell.col;
+      selectSingleCell(targetRow, targetCol);
+      rowVirtualizer.scrollToIndex(targetRow, { align: 'center' });
+    }
+  }, [focusTarget]);
+
+  // Column Resizer mouse drag listener
+  useEffect(() => {
+    if (!resizingCol) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const diff = e.clientX - resizingCol.startX;
+      const newWidth = Math.max(50, resizingCol.startWidth + diff);
+      const varMeta = variables[resizingCol.colIdx];
+      if (varMeta) {
+        setCustomColWidths((prev) => ({ ...prev, [varMeta.name]: newWidth }));
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      const diff = e.clientX - resizingCol.startX;
+      const finalWidth = Math.max(50, resizingCol.startWidth + diff);
+      const varMeta = variables[resizingCol.colIdx];
+      if (varMeta && onResizeColumn) {
+        onResizeColumn(varMeta.name, finalWidth);
+      }
+      setResizingCol(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingCol, variables, onResizeColumn]);
+
   const isMouseDownRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -112,8 +163,24 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     setSelectionType('cell');
   };
 
+  const extendSelection = (targetRow: number, targetCol: number) => {
+    const clampedRow = Math.max(0, Math.min(displayRowCount - 1, targetRow));
+    const clampedCol = Math.max(0, Math.min(Math.max(0, variables.length - 1), targetCol));
+    setSelectionRange((prev) => ({
+      ...prev,
+      endRow: clampedRow,
+      endCol: clampedCol,
+    }));
+    setSelectionType('cell');
+  };
+
   const handleCellMouseDown = (rIdx: number, cIdx: number, e: React.MouseEvent) => {
     if (e.button !== 0) return; // Only primary left-click
+    if (e.shiftKey && selectedCell.row >= 0 && selectedCell.col >= 0) {
+      // Shift+Click: Extend selection range from active cell to clicked cell
+      extendSelection(rIdx, cIdx);
+      return;
+    }
     isMouseDownRef.current = true;
     selectSingleCell(rIdx, cIdx);
   };
@@ -289,13 +356,104 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         } else if (e.key === 'Tab') {
           e.preventDefault();
           commitEdit();
-          if (selectedCell.col < variables.length - 1) {
-            selectSingleCell(selectedCell.row, selectedCell.col + 1);
+          if (e.shiftKey) {
+            // Shift+Tab: Move left, or wrap up to previous row
+            if (selectedCell.col > 0) {
+              selectSingleCell(selectedCell.row, selectedCell.col - 1);
+            } else if (selectedCell.row > 0) {
+              selectSingleCell(selectedCell.row - 1, Math.max(0, variables.length - 1));
+            }
           } else {
-            selectSingleCell(selectedCell.row + 1, 0);
+            // Tab: Move right, or wrap to next row
+            if (selectedCell.col < variables.length - 1) {
+              selectSingleCell(selectedCell.row, selectedCell.col + 1);
+            } else {
+              selectSingleCell(selectedCell.row + 1, 0);
+            }
           }
         }
         return;
+      }
+
+      // Ctrl+A: Select All (Entire Dataset)
+      if (e.ctrlKey && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault();
+        setSelectedCell({ row: 0, col: 0 });
+        setSelectionRange({
+          startRow: 0,
+          startCol: 0,
+          endRow: Math.max(0, displayRowCount - 1),
+          endCol: Math.max(0, variables.length - 1),
+        });
+        setSelectionType('cell');
+        return;
+      }
+
+      // Backspace: Clear cell and start editing immediately
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        if (selectedCell.row >= 0 && selectedCell.col >= 0 && variables[selectedCell.col]) {
+          onCellChange(selectedCell.row, variables[selectedCell.col].name, null);
+          startEditing(selectedCell.row, selectedCell.col, '');
+        }
+        return;
+      }
+
+      // Home & End keys
+      if (e.key === 'Home') {
+        e.preventDefault();
+        if (e.ctrlKey) {
+          selectSingleCell(0, 0);
+        } else {
+          selectSingleCell(selectedCell.row, 0);
+        }
+        return;
+      }
+
+      if (e.key === 'End') {
+        e.preventDefault();
+        const lastCol = Math.max(0, variables.length - 1);
+        if (e.ctrlKey) {
+          selectSingleCell(Math.max(0, rows.length - 1), lastCol);
+        } else {
+          selectSingleCell(selectedCell.row, lastCol);
+        }
+        return;
+      }
+
+      // Page Up & Page Down
+      const pageSize = Math.max(5, Math.floor((containerRef.current?.clientHeight || 480) / 24));
+      if (e.key === 'PageUp') {
+        e.preventDefault();
+        selectSingleCell(Math.max(0, selectedCell.row - pageSize), selectedCell.col);
+        return;
+      }
+
+      if (e.key === 'PageDown') {
+        e.preventDefault();
+        selectSingleCell(Math.min(displayRowCount - 1, selectedCell.row + pageSize), selectedCell.col);
+        return;
+      }
+
+      // Shift + Arrow Keys (Extend Selection Range)
+      if (e.shiftKey) {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          extendSelection(selectionRange.endRow - 1, selectionRange.endCol);
+          return;
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          extendSelection(selectionRange.endRow + 1, selectionRange.endCol);
+          return;
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          extendSelection(selectionRange.endRow, selectionRange.endCol - 1);
+          return;
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          extendSelection(selectionRange.endRow, selectionRange.endCol + 1);
+          return;
+        }
       }
 
       // Direct typing of alphanumeric character starts editing immediately (Excel / SPSS standard)
@@ -368,10 +526,18 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         startEditing(selectedCell.row, selectedCell.col);
       } else if (e.key === 'Tab') {
         e.preventDefault();
-        if (selectedCell.col < variables.length - 1) {
-          selectSingleCell(selectedCell.row, selectedCell.col + 1);
+        if (e.shiftKey) {
+          if (selectedCell.col > 0) {
+            selectSingleCell(selectedCell.row, selectedCell.col - 1);
+          } else if (selectedCell.row > 0) {
+            selectSingleCell(selectedCell.row - 1, Math.max(0, variables.length - 1));
+          }
         } else {
-          selectSingleCell(selectedCell.row + 1, 0);
+          if (selectedCell.col < variables.length - 1) {
+            selectSingleCell(selectedCell.row, selectedCell.col + 1);
+          } else {
+            selectSingleCell(selectedCell.row + 1, 0);
+          }
         }
       }
     };
@@ -380,9 +546,22 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [editingCell, selectedCell, selectionRange, variables, rows, editValue, displayRowCount]);
 
+  const isSystemMissing = (val: any, varMeta: VariableMeta) => {
+    if (val === undefined || val === null || val === '') {
+      return varMeta.type === 'Numeric' || varMeta.type === 'Dollar';
+    }
+    return false;
+  };
+
   // Helper to format cell display
   const formatCellValue = (val: any, varMeta: VariableMeta) => {
-    if (val === undefined || val === null || val === '') return '';
+    if (val === undefined || val === null || val === '') {
+      // In IBM SPSS, numeric system-missing values are displayed as '.'
+      if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
+        return '.';
+      }
+      return '';
+    }
 
     // If Value Labels is ON and mapped
     if (showValueLabels && varMeta.values && varMeta.values[String(val)]) {
@@ -475,11 +654,12 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               />
               {variables.map((v, cIdx) => {
                 const isColSelected = selectionType === 'col' && selectedCell.col === cIdx;
+                const colWidth = customColWidths[v.name] || Math.max(90, v.columns * 11);
                 return (
                   <th
                     key={v.name}
                     className={`spss-grid-th ${isColSelected ? 'selected-full-col' : ''}`}
-                    style={{ width: Math.max(90, v.columns * 11) }}
+                    style={{ width: colWidth, minWidth: 50 }}
                     onClick={() => selectFullColumn(cIdx)}
                     onDoubleClick={() => onSwitchToVariableView(v.name)}
                     onContextMenu={(e) => {
@@ -499,6 +679,20 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                       {renderMeasureIcon(v.measure)}
                       <span>{v.name}</span>
                     </div>
+                    {/* Column Resizer Handle */}
+                    <div
+                      className={`spss-th-resizer ${resizingCol?.colIdx === cIdx ? 'resizing' : ''}`}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setResizingCol({
+                          colIdx: cIdx,
+                          startX: e.clientX,
+                          startWidth: colWidth,
+                        });
+                      }}
+                      title="Drag to resize column"
+                    />
                   </th>
                 );
               })}
@@ -560,13 +754,14 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                     const isEditing = editingCell?.row === rIdx && editingCell?.col === cIdx;
                     const cellVal = row[v.name];
                     const alignClass = `align-${v.align.toLowerCase()}`;
+                    const isMissing = isSystemMissing(cellVal, v);
 
                     return (
                       <td
                         key={v.name}
                         className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''} ${
                           inRange && !isSelected ? 'in-selection-range' : ''
-                        }`}
+                        } ${isMissing ? 'system-missing' : ''}`}
                         onMouseDown={(e) => handleCellMouseDown(rIdx, cIdx, e)}
                         onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
                         onDoubleClick={() => startEditing(rIdx, cIdx)}
@@ -659,6 +854,17 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               onInsertRow(contextMenu.targetRow);
             } else {
               onAddRow();
+            }
+          }}
+          onDeleteRow={() => {
+            if (onDeleteRow) {
+              onDeleteRow(contextMenu.targetRow);
+            }
+          }}
+          onDeleteCol={() => {
+            const vName = variables[contextMenu.targetCol]?.name;
+            if (vName && onDeleteVariable) {
+              onDeleteVariable(vName);
             }
           }}
           onSortAscending={() => {

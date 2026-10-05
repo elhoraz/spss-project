@@ -80,6 +80,8 @@ export type AnalysisModalType =
   | 'logistic_regression'
   | 'compute_variable'
   | 'recode_variable'
+  | 'recode_different'
+  | 'recode_same'
   | 'sort_cases'
   | 'select_cases'
   | 'split_file'

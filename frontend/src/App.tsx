@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { TopMenuBar } from './components/TopMenuBar';
 import { Toolbar } from './components/Toolbar';
@@ -11,6 +11,9 @@ import { ValueLabelsModal } from './components/ValueLabelsModal';
 import { ImportExportModal } from './components/ImportExportModal';
 import { AboutModal } from './components/AboutModal';
 import { ServerSettingsModal } from './components/ServerSettingsModal';
+import { GoToCaseDialog } from './components/GoToCaseDialog';
+import { FindReplaceDialog } from './components/FindReplaceDialog';
+import { RecodeModal } from './components/RecodeModal';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
@@ -24,6 +27,43 @@ export const App: React.FC = () => {
   const [theme, setTheme] = useState<AppTheme>('spss-classic');
   const [activeModal, setActiveModal] = useState<AnalysisModalType>(null);
   const [valueLabelsVarName, setValueLabelsVarName] = useState<string | null>(null);
+
+  // Jump / Focus navigation state
+  const [showGoToCase, setShowGoToCase] = useState<boolean>(false);
+  const [showFindReplace, setShowFindReplace] = useState<boolean>(false);
+  const [focusTarget, setFocusTarget] = useState<{ row: number; col?: number; timestamp: number } | null>(null);
+
+  // Undo / Redo history engine (50 snapshots)
+  const pastRef = useRef<Dataset[]>([]);
+  const futureRef = useRef<Dataset[]>([]);
+  const [canUndo, setCanUndo] = useState<boolean>(false);
+  const [canRedo, setCanRedo] = useState<boolean>(false);
+
+  const pushHistory = (currentDataset: Dataset) => {
+    pastRef.current.push(JSON.parse(JSON.stringify(currentDataset)));
+    if (pastRef.current.length > 50) pastRef.current.shift();
+    futureRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  };
+
+  const handleUndo = () => {
+    if (pastRef.current.length === 0) return;
+    const previous = pastRef.current.pop()!;
+    futureRef.current.push(JSON.parse(JSON.stringify(dataset)));
+    setDataset(previous);
+    setCanUndo(pastRef.current.length > 0);
+    setCanRedo(true);
+  };
+
+  const handleRedo = () => {
+    if (futureRef.current.length === 0) return;
+    const next = futureRef.current.pop()!;
+    pastRef.current.push(JSON.parse(JSON.stringify(dataset)));
+    setDataset(next);
+    setCanUndo(true);
+    setCanRedo(futureRef.current.length > 0);
+  };
 
   // Syntax and Outputs
   const [syntaxCode, setSyntaxCode] = useState<string>(
@@ -64,19 +104,83 @@ export const App: React.FC = () => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Global desktop keyboard shortcuts (Wave 6)
+  // Global desktop keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape closes open modals
-      if (e.key === 'Escape' && activeModal) {
-        setActiveModal(null);
-        return;
+      // Escape closes open modals and dialogs
+      if (e.key === 'Escape') {
+        if (showGoToCase) {
+          setShowGoToCase(false);
+          return;
+        }
+        if (showFindReplace) {
+          setShowFindReplace(false);
+          return;
+        }
+        if (activeModal) {
+          setActiveModal(null);
+          return;
+        }
       }
 
       // F1 opens About / Help
       if (e.key === 'F1') {
         e.preventDefault();
         setActiveModal('about_spss');
+        return;
+      }
+
+      // Global Undo (Ctrl+Z)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      // Global Redo (Ctrl+Y or Ctrl+Shift+Z)
+      if (
+        (e.ctrlKey && !e.shiftKey && (e.key === 'y' || e.key === 'Y')) ||
+        (e.ctrlKey && e.shiftKey && (e.key === 'z' || e.key === 'Z'))
+      ) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
+      // Global Save (Ctrl+S)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        handleExport('xlsx');
+        return;
+      }
+
+      // Global Open (Ctrl+O)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        setActiveModal('import_data');
+        return;
+      }
+
+      // Global New Dataset (Ctrl+N)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'n' || e.key === 'N')) {
+        e.preventDefault();
+        handleNewDataset();
+        return;
+      }
+
+      // Global Go to Case (Ctrl+G)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        setActiveView('data');
+        setShowGoToCase(true);
+        return;
+      }
+
+      // Global Find & Replace (Ctrl+F or Ctrl+H)
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'f' || e.key === 'F' || e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        setActiveView('data');
+        setShowFindReplace(true);
         return;
       }
 
@@ -109,7 +213,7 @@ export const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeModal, activeView, syntaxCode, dataset.rows]);
+  }, [activeModal, activeView, syntaxCode, dataset.rows, showGoToCase, showFindReplace]);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'spss-classic' ? 'modern-light' : prev === 'modern-light' ? 'academic-dark' : 'spss-classic'));
@@ -117,6 +221,7 @@ export const App: React.FC = () => {
 
   // Cell editing in Data View (auto-expands rows and auto-creates variable if empty)
   const handleCellChange = (rowIndex: number, varName: string, value: any) => {
+    pushHistory(dataset);
     let currentVars = [...dataset.variables];
     if (currentVars.length === 0) {
       const newVar: VariableMeta = {
@@ -150,6 +255,7 @@ export const App: React.FC = () => {
 
   // High-performance bulk paste from Excel / Clipboard
   const handleBulkPaste = (startRow: number, startCol: number, matrix: string[][]) => {
+    pushHistory(dataset);
     let currentVars = [...dataset.variables];
     const maxColNeeded = startCol + Math.max(...matrix.map((r) => r.length), 1);
 
@@ -209,6 +315,7 @@ export const App: React.FC = () => {
 
   // Start a new blank dataset (File -> New -> Data)
   const handleNewDataset = () => {
+    pushHistory(dataset);
     const defaultVars: VariableMeta[] = [
       { name: 'VAR00001', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
       { name: 'VAR00002', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
@@ -225,6 +332,7 @@ export const App: React.FC = () => {
 
   // Add row (case)
   const handleAddRow = () => {
+    pushHistory(dataset);
     const newRow: Record<string, any> = {};
     dataset.variables.forEach((v) => {
       newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? 0 : '';
@@ -233,8 +341,17 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, rows: [...dataset.rows, newRow] });
   };
 
+  // Delete row (case) by index
+  const handleDeleteRow = (rowIndex: number) => {
+    if (rowIndex < 0 || rowIndex >= dataset.rows.length) return;
+    pushHistory(dataset);
+    const updatedRows = dataset.rows.filter((_, i) => i !== rowIndex);
+    setDataset({ ...dataset, rows: updatedRows });
+  };
+
   // Add variable
   const handleAddVariable = () => {
+    pushHistory(dataset);
     const varNum = dataset.variables.length + 1;
     const newVarName = `VAR0000${varNum}`.slice(-8);
     const newVar: VariableMeta = {
@@ -260,6 +377,7 @@ export const App: React.FC = () => {
 
   // Update variable metadata
   const handleUpdateVariable = (index: number, updated: Partial<VariableMeta>) => {
+    pushHistory(dataset);
     const oldVar = dataset.variables[index];
     const newVariables = [...dataset.variables];
     newVariables[index] = { ...oldVar, ...updated };
@@ -279,8 +397,9 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, variables: newVariables });
   };
 
-  // Delete variable
+  // Delete variable by index
   const handleDeleteVariable = (index: number) => {
+    pushHistory(dataset);
     const varToDelete = dataset.variables[index];
     const newVariables = dataset.variables.filter((_, i) => i !== index);
     const updatedRows = dataset.rows.map((row) => {
@@ -291,8 +410,32 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, variables: newVariables, rows: updatedRows });
   };
 
+  // Delete variable by name
+  const handleDeleteVariableByName = (varName: string) => {
+    const idx = dataset.variables.findIndex((v) => v.name === varName);
+    if (idx !== -1) {
+      handleDeleteVariable(idx);
+    }
+  };
+
+  // Resize column width
+  const handleResizeColumn = (varName: string, newWidthPx: number) => {
+    const newCols = Math.max(3, Math.round(newWidthPx / 11));
+    const idx = dataset.variables.findIndex((v) => v.name === varName);
+    if (idx !== -1) {
+      handleUpdateVariable(idx, { columns: newCols });
+    }
+  };
+
+  // Bulk update rows (from Find & Replace All)
+  const handleBulkUpdateRows = (updatedRows: Record<string, any>[]) => {
+    pushHistory(dataset);
+    setDataset({ ...dataset, rows: updatedRows });
+  };
+
   // Insert row before specified index
   const handleInsertRow = (beforeIndex: number) => {
+    pushHistory(dataset);
     const newRow: Record<string, any> = {};
     dataset.variables.forEach((v) => {
       newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? 0 : '';
@@ -305,6 +448,7 @@ export const App: React.FC = () => {
 
   // Insert variable before specified index
   const handleInsertVariable = (beforeIndex: number) => {
+    pushHistory(dataset);
     const varNum = dataset.variables.length + 1;
     const newVarName = `VAR0000${varNum}`.slice(-8);
     const newVar: VariableMeta = {
@@ -328,6 +472,7 @@ export const App: React.FC = () => {
 
   // Clear cells in selection range
   const handleClearCells = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
+    pushHistory(dataset);
     const minR = Math.min(range.startRow, range.endRow);
     const maxR = Math.max(range.startRow, range.endRow);
     const minC = Math.min(range.startCol, range.endCol);
@@ -473,6 +618,18 @@ export const App: React.FC = () => {
         onNewData={handleNewDataset}
         onToggleValueLabels={() => setShowValueLabels(!showValueLabels)}
         showValueLabels={showValueLabels}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onGoToCase={() => {
+          setActiveView('data');
+          setShowGoToCase(true);
+        }}
+        onFindReplace={() => {
+          setActiveView('data');
+          setShowFindReplace(true);
+        }}
       />
 
       {/* 3. Toolbar */}
@@ -488,6 +645,10 @@ export const App: React.FC = () => {
         onSelectSampleDataset={handleSelectSampleDataset}
         onExport={handleExport}
         onNewData={handleNewDataset}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={canUndo}
+        canRedo={canRedo}
       />
 
       {/* 4. Main Workspace */}
@@ -504,12 +665,16 @@ export const App: React.FC = () => {
               onAddVariable={handleAddVariable}
               onInsertRow={handleInsertRow}
               onInsertVariable={handleInsertVariable}
+              onDeleteRow={handleDeleteRow}
+              onDeleteVariable={handleDeleteVariableByName}
+              onResizeColumn={handleResizeColumn}
               onClearCells={handleClearCells}
               onSortCases={handleSortCases}
               onQuickDescriptives={handleQuickDescriptives}
               onSwitchToVariableView={(varName) => {
                 setActiveView('variable');
               }}
+              focusTarget={focusTarget}
             />
           )}
 
@@ -530,6 +695,7 @@ export const App: React.FC = () => {
             <OutputViewer
               outputs={outputs}
               onClearOutputs={() => setOutputs([])}
+              onDeleteOutputItem={(id) => setOutputs((prev) => prev.filter((item) => item.id !== id))}
               onExport={handleExport}
             />
           )}
@@ -690,6 +856,63 @@ export const App: React.FC = () => {
         onClose={() => setActiveModal(null)}
         onStatusChange={(online) => setIsBackendOnline(online)}
       />
+
+      {/* Go to Case Dialog */}
+      {showGoToCase && (
+        <GoToCaseDialog
+          variables={dataset.variables}
+          totalRows={dataset.rows.length}
+          onClose={() => setShowGoToCase(false)}
+          onGoTo={(targetRow, targetCol) => {
+            setFocusTarget({ row: targetRow, col: targetCol, timestamp: Date.now() });
+          }}
+        />
+      )}
+
+      {/* Find and Replace Dialog */}
+      {showFindReplace && (
+        <FindReplaceDialog
+          variables={dataset.variables}
+          rows={dataset.rows}
+          activeColIdx={focusTarget?.col ?? 0}
+          activeRowIdx={focusTarget?.row ?? 0}
+          onClose={() => setShowFindReplace(false)}
+          onNavigateToMatch={(r, c) => {
+            setFocusTarget({ row: r, col: c, timestamp: Date.now() });
+          }}
+          onReplaceCell={(r, varName, newVal) => {
+            handleCellChange(r, varName, newVal);
+          }}
+          onBulkUpdateRows={handleBulkUpdateRows}
+        />
+      )}
+
+      {/* Recode into Different / Same Variables Modal */}
+      {(activeModal === 'recode_different' || activeModal === 'recode_same') && (
+        <RecodeModal
+          mode={activeModal === 'recode_different' ? 'different' : 'same'}
+          variables={dataset.variables}
+          rows={dataset.rows}
+          onClose={() => setActiveModal(null)}
+          onPasteSyntax={(syn) => handlePasteSyntax(syn)}
+          onApply={(newVars, newRows, syn) => {
+            pushHistory(dataset);
+            setDataset({ ...dataset, variables: newVars, rows: newRows });
+            const logItem: OutputItem = {
+              id: String(Date.now()),
+              timestamp: new Date().toLocaleTimeString(),
+              title: activeModal === 'recode_different' ? 'Recode into Different Variables' : 'Recode into Same Variables',
+              type: 'compute_variable',
+              syntax: syn,
+              data: {
+                message: `Recode executed successfully on ${newRows.length} cases.`,
+              },
+            };
+            setOutputs((prev) => [logItem, ...prev]);
+            setActiveView('output');
+          }}
+        />
+      )}
     </div>
   );
 };

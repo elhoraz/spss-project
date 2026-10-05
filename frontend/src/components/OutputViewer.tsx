@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Layers,
   FileText,
@@ -8,6 +8,10 @@ import {
   Printer,
   FileSpreadsheet,
   Download,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { OutputItem } from '../types/spss';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement } from 'chart.js';
@@ -19,14 +23,40 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend,
 interface OutputViewerProps {
   outputs: OutputItem[];
   onClearOutputs: () => void;
+  onDeleteOutputItem?: (id: string) => void;
   onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
 }
 
-export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onExport }) => {
+export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onDeleteOutputItem, onExport }) => {
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
 
   const scrollToItem = (id: string) => {
     itemRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const toggleCollapse = (id: string) => {
+    setCollapsedItems((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleCopyTable = (itemId: string) => {
+    const cardEl = itemRefs.current[itemId];
+    if (!cardEl) return;
+    const tableEl = cardEl.querySelector('table');
+    if (!tableEl) return;
+
+    const rows = Array.from(tableEl.querySelectorAll('tr'));
+    const tsv = rows
+      .map((row) => {
+        const cells = Array.from(row.querySelectorAll('th, td'));
+        return cells.map((cell) => cell.textContent?.trim() || '').join('\t');
+      })
+      .join('\r\n');
+
+    navigator.clipboard.writeText(tsv);
+    setCopiedId(itemId);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   // Helper to render SPSS Pivot Tables
@@ -1535,24 +1565,59 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 }}
                 className="spss-output-item-card"
               >
-                {/* Title */}
-                <div className="spss-output-item-title">
-                  {item.type === 'chart' ? <BarChart2 size={18} color="var(--accent)" /> : <TableIcon size={18} color="var(--accent)" />}
-                  <span>{item.title}</span>
+                {/* Title & Actions */}
+                <div className="spss-output-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
+                    onClick={() => toggleCollapse(item.id)}
+                    title={collapsedItems[item.id] ? 'Expand' : 'Collapse'}
+                  >
+                    {collapsedItems[item.id] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                  </button>
+                  {item.type === 'chart' ? <BarChart2 size={16} color="var(--accent)" /> : <TableIcon size={16} color="var(--accent)" />}
+                  <span style={{ fontWeight: 600 }}>{item.title}</span>
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)', marginLeft: 'auto' }}>
                     {item.timestamp}
                   </span>
+
+                  {/* Copy Table Button */}
+                  <button
+                    className="spss-btn"
+                    style={{ padding: '2px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+                    onClick={() => handleCopyTable(item.id)}
+                    title="Copy table to clipboard (TSV for Excel / Word)"
+                  >
+                    {copiedId === item.id ? <Check size={12} color="var(--success)" /> : <Copy size={12} />}
+                    <span>{copiedId === item.id ? 'Copied' : 'Copy Table'}</span>
+                  </button>
+
+                  {/* Delete Item Button */}
+                  {onDeleteOutputItem && (
+                    <button
+                      className="spss-btn spss-btn-danger"
+                      style={{ padding: '2px 6px', display: 'flex', alignItems: 'center' }}
+                      onClick={() => onDeleteOutputItem(item.id)}
+                      title="Delete this output"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
 
-                {/* Syntax Log Box */}
-                {item.syntax && (
-                  <div className="spss-syntax-log-block">
-                    {item.syntax}
-                  </div>
-                )}
+                {/* Collapsible Body */}
+                {!collapsedItems[item.id] && (
+                  <>
+                    {/* Syntax Log Box */}
+                    {item.syntax && (
+                      <div className="spss-syntax-log-block">
+                        {item.syntax}
+                      </div>
+                    )}
 
-                {/* Pivot Table / Visualization */}
-                {renderPivotContent(item)}
+                    {/* Pivot Table / Visualization */}
+                    {renderPivotContent(item)}
+                  </>
+                )}
               </div>
             ))
           )}

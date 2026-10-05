@@ -26,6 +26,12 @@ interface TopMenuBarProps {
   onNewData: () => void;
   onToggleValueLabels: () => void;
   showValueLabels: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onGoToCase?: () => void;
+  onFindReplace?: () => void;
 }
 
 export const TopMenuBar: React.FC<TopMenuBarProps> = ({
@@ -36,6 +42,12 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onNewData,
   onToggleValueLabels,
   showValueLabels,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onGoToCase,
+  onFindReplace,
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -132,13 +144,27 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
         </button>
         {openMenu === 'edit' && (
           <div className="spss-dropdown">
-            <div className="spss-dropdown-item disabled">
+            <div
+              className={`spss-dropdown-item ${!canUndo ? 'disabled' : ''}`}
+              onClick={() => {
+                if (canUndo && onUndo) {
+                  handleAction(onUndo);
+                }
+              }}
+            >
               <div className="spss-dropdown-item-left">
                 <Undo2 size={14} /> Undo
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+Z</span>
             </div>
-            <div className="spss-dropdown-item disabled">
+            <div
+              className={`spss-dropdown-item ${!canRedo ? 'disabled' : ''}`}
+              onClick={() => {
+                if (canRedo && onRedo) {
+                  handleAction(onRedo);
+                }
+              }}
+            >
               <div className="spss-dropdown-item-left">
                 <Redo2 size={14} /> Redo
               </div>
@@ -150,11 +176,33 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <Sliders size={14} /> Insert Variable
               </div>
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onSetActiveView('data'))}>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onGoToCase) {
+                  handleAction(onGoToCase);
+                } else {
+                  handleAction(() => onSetActiveView('data'));
+                }
+              }}
+            >
               <div className="spss-dropdown-item-left">
                 <Table size={14} /> Go to Case...
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+G</span>
+            </div>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onFindReplace) {
+                  handleAction(onFindReplace);
+                }
+              }}
+            >
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> Find & Replace...
+              </div>
+              <span className="spss-dropdown-shortcut">Ctrl+F</span>
             </div>
           </div>
         )}
@@ -247,11 +295,12 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('compute_variable'))}>
               Compute Variable...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('sort_cases'))}>
-              Sort Cases...
+            <div className="spss-dropdown-divider" />
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('recode_different'))}>
+              Recode into Different Variables...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('select_cases'))}>
-              Select Cases (Filter)...
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('recode_same'))}>
+              Recode into Same Variables...
             </div>
           </div>
         )}
