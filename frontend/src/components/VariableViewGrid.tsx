@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { VariableMeta, VariableType, VariableAlign, VariableMeasure, VariableRole } from '../types/spss';
 import { Trash2, Plus } from 'lucide-react';
 import { VariableTypeModal } from './VariableTypeModal';
@@ -21,6 +21,96 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
 }) => {
   const [selectedTypeVarIdx, setSelectedTypeVarIdx] = useState<number | null>(null);
   const [selectedMissingVarIdx, setSelectedMissingVarIdx] = useState<number | null>(null);
+
+  // Focus management across the 11 columns of Variable View
+  const cellRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingFocusRef = useRef<{ row: number; col: number } | null>(null);
+
+  const focusCell = (row: number, col: number) => {
+    const key = `${row}_${col}`;
+    const el = cellRefs.current[key];
+    if (el) {
+      el.focus();
+      if (el instanceof HTMLInputElement) {
+        el.select();
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (pendingFocusRef.current) {
+      const { row, col } = pendingFocusRef.current;
+      pendingFocusRef.current = null;
+      setTimeout(() => {
+        focusCell(row, col);
+      }, 50);
+    }
+  }, [variables.length]);
+
+  const handleKeyDown = (e: React.KeyboardEvent, row: number, col: number) => {
+    // 1. Enter Key: Commit and move down to next row (or create new variable at end)
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (row < variables.length - 1) {
+        focusCell(row + 1, col);
+      } else {
+        // Last row: automatically create new variable and focus it!
+        pendingFocusRef.current = { row: row + 1, col };
+        onAddVariable();
+      }
+      return;
+    }
+
+    // 2. Tab Key: Move horizontally across columns, wrapping to next/previous row
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        // Shift+Tab: move left
+        if (col > 0) {
+          focusCell(row, col - 1);
+        } else if (row > 0) {
+          focusCell(row - 1, 10);
+        }
+      } else {
+        // Tab: move right
+        if (col < 10) {
+          focusCell(row, col + 1);
+        } else if (row < variables.length - 1) {
+          focusCell(row + 1, 0);
+        } else {
+          // Last cell of last row: add new variable
+          pendingFocusRef.current = { row: row + 1, col: 0 };
+          onAddVariable();
+        }
+      }
+      return;
+    }
+
+    // 3. Arrow Down: Move to same column in row below
+    if (e.key === 'ArrowDown') {
+      if (e.target instanceof HTMLSelectElement) return; // let select change option
+      if (row < variables.length - 1) {
+        e.preventDefault();
+        focusCell(row + 1, col);
+      } else if (col === 0) {
+        // At the last row's Name column: pressing down creates new variable row
+        e.preventDefault();
+        pendingFocusRef.current = { row: row + 1, col: 0 };
+        onAddVariable();
+      }
+      return;
+    }
+
+    // 4. Arrow Up: Move to same column in row above
+    if (e.key === 'ArrowUp') {
+      if (e.target instanceof HTMLSelectElement) return; // let select change option
+      if (row > 0) {
+        e.preventDefault();
+        focusCell(row - 1, col);
+      }
+      return;
+    }
+  };
 
   const formatValuesSummary = (v: VariableMeta) => {
     const keys = Object.keys(v.values || {});
@@ -55,20 +145,28 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
               {/* Row Number */}
               <td className="spss-grid-row-header">{idx + 1}</td>
 
-              {/* 1. Name */}
+              {/* 0. Name */}
               <td className="spss-varview-td">
                 <input
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_0`] = el;
+                  }}
                   className="spss-varview-input"
                   value={v.name}
                   onChange={(e) => onUpdateVariable(idx, { name: e.target.value.replace(/\s+/g, '_') })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 0)}
                 />
               </td>
 
-              {/* 2. Type */}
+              {/* 1. Type */}
               <td className="spss-varview-td">
                 <button
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_1`] = el;
+                  }}
                   className="spss-ellipsis-btn"
                   onClick={() => setSelectedTypeVarIdx(idx)}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 1)}
                   title="Define Variable Type"
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -78,19 +176,26 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                 </button>
               </td>
 
-              {/* 3. Width */}
+              {/* 2. Width */}
               <td className="spss-varview-td">
                 <input
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_2`] = el;
+                  }}
                   type="number"
                   className="spss-varview-input"
                   value={v.width}
                   onChange={(e) => onUpdateVariable(idx, { width: parseInt(e.target.value) || 8 })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 2)}
                 />
               </td>
 
-              {/* 4. Decimals */}
+              {/* 3. Decimals */}
               <td className="spss-varview-td">
                 <input
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_3`] = el;
+                  }}
                   type="number"
                   className="spss-varview-input"
                   value={v.decimals}
@@ -98,24 +203,33 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                   max={10}
                   disabled={v.type === 'String'}
                   onChange={(e) => onUpdateVariable(idx, { decimals: Math.max(0, parseInt(e.target.value) || 0) })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 3)}
                 />
               </td>
 
-              {/* 5. Label */}
+              {/* 4. Label */}
               <td className="spss-varview-td">
                 <input
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_4`] = el;
+                  }}
                   className="spss-varview-input"
                   placeholder="Variable label..."
                   value={v.label}
                   onChange={(e) => onUpdateVariable(idx, { label: e.target.value })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 4)}
                 />
               </td>
 
-              {/* 6. Values (Modal trigger) */}
+              {/* 5. Values (Modal trigger) */}
               <td className="spss-varview-td">
                 <button
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_5`] = el;
+                  }}
                   className="spss-ellipsis-btn"
                   onClick={() => onOpenValueLabels(v.name)}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 5)}
                   title="Define Value Labels"
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -125,11 +239,15 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                 </button>
               </td>
 
-              {/* 7. Missing */}
+              {/* 6. Missing */}
               <td className="spss-varview-td">
                 <button
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_6`] = el;
+                  }}
                   className="spss-ellipsis-btn"
                   onClick={() => setSelectedMissingVarIdx(idx)}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 6)}
                   title="Define Missing Values"
                 >
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -139,22 +257,30 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                 </button>
               </td>
 
-              {/* 8. Columns */}
+              {/* 7. Columns */}
               <td className="spss-varview-td">
                 <input
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_7`] = el;
+                  }}
                   type="number"
                   className="spss-varview-input"
                   value={v.columns}
                   onChange={(e) => onUpdateVariable(idx, { columns: parseInt(e.target.value) || 8 })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 7)}
                 />
               </td>
 
-              {/* 9. Align */}
+              {/* 8. Align */}
               <td className="spss-varview-td">
                 <select
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_8`] = el;
+                  }}
                   className="spss-varview-select"
                   value={v.align}
                   onChange={(e) => onUpdateVariable(idx, { align: e.target.value as VariableAlign })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 8)}
                 >
                   <option value="Right">Right</option>
                   <option value="Left">Left</option>
@@ -162,12 +288,16 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                 </select>
               </td>
 
-              {/* 10. Measure */}
+              {/* 9. Measure */}
               <td className="spss-varview-td">
                 <select
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_9`] = el;
+                  }}
                   className="spss-varview-select"
                   value={v.measure}
                   onChange={(e) => onUpdateVariable(idx, { measure: e.target.value as VariableMeasure })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 9)}
                 >
                   <option value="Scale">Scale</option>
                   <option value="Ordinal">Ordinal</option>
@@ -175,12 +305,16 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                 </select>
               </td>
 
-              {/* 11. Role */}
+              {/* 10. Role */}
               <td className="spss-varview-td">
                 <select
+                  ref={(el) => {
+                    cellRefs.current[`${idx}_10`] = el;
+                  }}
                   className="spss-varview-select"
                   value={v.role}
                   onChange={(e) => onUpdateVariable(idx, { role: e.target.value as VariableRole })}
+                  onKeyDown={(e) => handleKeyDown(e, idx, 10)}
                 >
                   <option value="Input">Input</option>
                   <option value="Target">Target</option>
