@@ -35,14 +35,50 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     setErrorMsg(null);
     const reader = new FileReader();
 
-    if (file.name.endsWith('.json')) {
+    if (file.name.endsWith('.sav')) {
+      // Native SPSS .sav via backend pyreadstat
+      const formData = new FormData();
+      formData.append('file', file);
+      fetch('/api/datasets/import', {
+        method: 'POST',
+        body: formData,
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to read .sav file on server');
+          }
+          return res.json();
+        })
+        .then((data) => {
+          if (data && data.dataset) {
+            setPreviewData({
+              name: data.dataset.name || file.name,
+              vars: data.dataset.variables || [],
+              rows: data.dataset.rows || [],
+            });
+          } else {
+            setErrorMsg('Invalid dataset returned from .sav file');
+          }
+        })
+        .catch((err: any) => {
+          setErrorMsg('Error loading .sav file: ' + (err.message || 'Make sure backend is running'));
+        });
+    } else if (file.name.endsWith('.json')) {
       reader.onload = (e) => {
         try {
           const json = JSON.parse(e.target?.result as string);
-          if (Array.isArray(json) && json.length > 0) {
+          if (json && Array.isArray(json.variables) && Array.isArray(json.rows)) {
+            // Full SPSS dataset format
+            setPreviewData({
+              name: json.name || file.name,
+              vars: json.variables,
+              rows: json.rows,
+            });
+          } else if (Array.isArray(json) && json.length > 0) {
             setupPreview(file.name, json);
           } else {
-            setErrorMsg('Invalid JSON structure: Expected an array of objects.');
+            setErrorMsg('Invalid JSON structure: Expected an array of objects or an SPSS dataset.');
           }
         } catch (_err: any) {
           setErrorMsg('Failed to parse JSON file.');
@@ -210,12 +246,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               Drag & Drop data file here, or click to browse
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
-              Supports CSV, Excel (.xlsx, .xls), TSV, and JSON formats
+              Supports SPSS (.sav), Excel (.xlsx, .xls), CSV, TSV, and JSON formats
             </div>
             <input
               id="spss-file-input"
               type="file"
-              accept=".csv,.xlsx,.xls,.tsv,.json"
+              accept=".sav,.csv,.xlsx,.xls,.tsv,.json"
               style={{ display: 'none' }}
               onChange={handleFileInput}
             />

@@ -52,11 +52,15 @@ class DescriptivesRequest(BaseModel):
     variables: List[str]
     data: List[Dict[str, Any]]
     statistics: Optional[List[str]] = None
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class FrequenciesRequest(BaseModel):
     variables: List[str]
     data: List[Dict[str, Any]]
     value_labels: Optional[Dict[str, Dict[str, str]]] = None
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class CrosstabsRequest(BaseModel):
     row_var: str
@@ -65,16 +69,22 @@ class CrosstabsRequest(BaseModel):
     display_expected: bool = True
     display_row_pct: bool = True
     display_col_pct: bool = True
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class CorrelationRequest(BaseModel):
     variables: List[str]
     data: List[Dict[str, Any]]
     method: str = "pearson" # pearson, spearman, kendall
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class OneSampleTTestRequest(BaseModel):
     variables: List[str]
     data: List[Dict[str, Any]]
     test_value: float = 0.0
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class IndependentTTestRequest(BaseModel):
     test_variables: List[str]
@@ -82,21 +92,29 @@ class IndependentTTestRequest(BaseModel):
     data: List[Dict[str, Any]]
     group1_val: Optional[Any] = None
     group2_val: Optional[Any] = None
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class PairedTTestRequest(BaseModel):
     pairs: List[List[str]] # e.g. [["salary", "salbegin"]]
     data: List[Dict[str, Any]]
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class AnovaRequest(BaseModel):
     dependent_variable: str
     factor_variable: str
     data: List[Dict[str, Any]]
     run_post_hoc: bool = True
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class RegressionRequest(BaseModel):
     dependent_variable: str
     independent_variables: List[str]
     data: List[Dict[str, Any]]
+    split_by: Optional[str] = None
+    weight_by: Optional[str] = None
 
 class SyntaxRunRequest(BaseModel):
     syntax: str

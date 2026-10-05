@@ -29,6 +29,7 @@ interface DataViewGridProps {
   onInsertRow?: (beforeIndex: number) => void;
   onInsertVariable?: (beforeIndex: number) => void;
   onDeleteRow?: (rowIndex: number) => void;
+  onDeleteRows?: (rowIndices: number[]) => void;
   onDeleteVariable?: (varName: string) => void;
   onResizeColumn?: (varName: string, newWidthPx: number) => void;
   onClearCells?: (range: SelectionRange) => void;
@@ -49,6 +50,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   onInsertRow,
   onInsertVariable,
   onDeleteRow,
+  onDeleteRows,
   onDeleteVariable,
   onResizeColumn,
   onClearCells,
@@ -58,6 +60,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   focusTarget,
 }) => {
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
+  const [selectedRows, setSelectedRows] = useState<number[]>([0]);
   const [selectionRange, setSelectionRange] = useState<SelectionRange>({
     startRow: 0,
     startCol: 0,
@@ -160,6 +163,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   const selectSingleCell = (rIdx: number, cIdx: number) => {
     setSelectedCell({ row: rIdx, col: cIdx });
     setSelectionRange({ startRow: rIdx, startCol: cIdx, endRow: rIdx, endCol: cIdx });
+    setSelectedRows([rIdx]);
     setSelectionType('cell');
   };
 
@@ -195,9 +199,17 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     }
   };
 
-  // Handle full row selection
-  const selectFullRow = (rIdx: number) => {
+  // Handle full row selection with optional multi-select (Ctrl+Click)
+  const selectFullRow = (rIdx: number, isMulti = false) => {
     setSelectedCell({ row: rIdx, col: 0 });
+    if (isMulti) {
+      setSelectedRows((prev) => {
+        const next = prev.includes(rIdx) ? prev.filter((r) => r !== rIdx) : [...prev, rIdx];
+        return next.length > 0 ? next : [rIdx];
+      });
+    } else {
+      setSelectedRows([rIdx]);
+    }
     setSelectionRange({
       startRow: rIdx,
       startCol: 0,
@@ -324,6 +336,14 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   };
 
   const handleClearSelection = () => {
+    if (selectionType === 'row' && selectedRows.length > 1) {
+      selectedRows.forEach((r) => {
+        variables.forEach((v) => {
+          onCellChange(r, v.name, null);
+        });
+      });
+      return;
+    }
     if (onClearCells) {
       onClearCells(selectionRange);
       return;
@@ -496,14 +516,33 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         return;
       }
 
-      // Fill Down (Ctrl+D)
-      if (e.ctrlKey && e.key === 'd') {
+      // Fill Down (Ctrl+D) - standard Excel / SPSS range fill down
+      if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault();
-        if (variables[selectedCell.col]) {
-          const varName = variables[selectedCell.col].name;
-          const currentVal = rows[selectedCell.row]?.[varName];
-          onCellChange(selectedCell.row + 1, varName, currentVal);
-          selectSingleCell(selectedCell.row + 1, selectedCell.col);
+        const minR = Math.min(selectionRange.startRow, selectionRange.endRow);
+        const maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
+        const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
+        const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+
+        if (minR < maxR) {
+          // Range selection: fill top row down to all selected rows
+          for (let r = minR + 1; r <= maxR; r++) {
+            for (let c = minC; c <= maxC; c++) {
+              const varMeta = variables[c];
+              if (varMeta) {
+                const topVal = rows[minR]?.[varMeta.name];
+                onCellChange(r, varMeta.name, topVal !== undefined ? topVal : null);
+              }
+            }
+          }
+        } else {
+          // Single cell selection: copy selected cell to row immediately below
+          if (variables[selectedCell.col]) {
+            const varName = variables[selectedCell.col].name;
+            const currentVal = rows[selectedCell.row]?.[varName];
+            onCellChange(selectedCell.row + 1, varName, currentVal !== undefined ? currentVal : null);
+            selectSingleCell(selectedCell.row + 1, selectedCell.col);
+          }
         }
         return;
       }
@@ -720,20 +759,24 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               const rIdx = virtualRow.index;
               const row = rows[rIdx] || {};
 
-              const isRowSelected = selectionType === 'row' && selectedCell.row === rIdx;
+              const isRowSelected =
+                (selectionType === 'row' && selectedRows.includes(rIdx)) ||
+                (selectionType === 'row' && selectedCell.row === rIdx);
               const isFiltered = isRowFiltered(row);
 
               return (
-                <tr key={rIdx} style={{ height: 24 }}>
+                <tr key={rIdx} className={isFiltered ? 'filtered-case-row' : ''} style={{ height: 24 }}>
                   {/* Row Header Number */}
                   <td
                     className={`spss-grid-row-header ${isRowSelected ? 'selected-full-row' : ''} ${
                       isFiltered ? 'filtered-case' : ''
                     } ${selectedCell.row === rIdx ? 'active-row' : ''}`}
-                    onClick={() => selectFullRow(rIdx)}
+                    onClick={(e) => selectFullRow(rIdx, e.ctrlKey || e.metaKey)}
                     onContextMenu={(e) => {
                       e.preventDefault();
-                      selectFullRow(rIdx);
+                      if (!selectedRows.includes(rIdx)) {
+                        selectFullRow(rIdx, false);
+                      }
                       setContextMenu({
                         x: e.clientX,
                         y: e.clientY,
@@ -751,6 +794,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                   {variables.map((v, cIdx) => {
                     const isSelected = selectedCell.row === rIdx && selectedCell.col === cIdx;
                     const inRange = isCellInRange(rIdx, cIdx);
+                    const inMultiRow = selectionType === 'row' && selectedRows.includes(rIdx);
                     const isEditing = editingCell?.row === rIdx && editingCell?.col === cIdx;
                     const cellVal = row[v.name];
                     const alignClass = `align-${v.align.toLowerCase()}`;
@@ -760,7 +804,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                       <td
                         key={v.name}
                         className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''} ${
-                          inRange && !isSelected ? 'in-selection-range' : ''
+                          (inRange && !isSelected) || (inMultiRow && !isSelected) ? 'in-selection-range' : ''
                         } ${isMissing ? 'system-missing' : ''}`}
                         onMouseDown={(e) => handleCellMouseDown(rIdx, cIdx, e)}
                         onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
@@ -857,7 +901,9 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
             }
           }}
           onDeleteRow={() => {
-            if (onDeleteRow) {
+            if (selectedRows.length > 1 && onDeleteRows) {
+              onDeleteRows(selectedRows);
+            } else if (onDeleteRow) {
               onDeleteRow(contextMenu.targetRow);
             }
           }}

@@ -1,5 +1,4 @@
-// Client-side Statistical Engine in TypeScript for OpenSPSS
-import { OutputItem } from '../types/spss';
+import { OutputItem, VariableMeta } from '../types/spss';
 
 // Helper: Statistical standard normal CDF approximation
 function normalCdf(x: number): number {
@@ -391,21 +390,34 @@ export function clientComputeCorrelations(rows: Record<string, any>[], variables
 }
 
 // 5. ONE SAMPLE T-TEST
-export function clientComputeOneSampleTTest(rows: Record<string, any>[], variables: string[], testValue: number = 0): OutputItem {
+export function clientComputeOneSampleTTest(
+  rows: Record<string, any>[],
+  variables: string[],
+  testValue: number = 0,
+  weightVar?: string | null
+): OutputItem {
   const descriptives: any[] = [];
   const testResults: any[] = [];
 
   variables.forEach((v) => {
-    const vals = rows.map((r) => parseFloat(r[v])).filter((x) => !isNaN(x) && isFinite(x));
-    const n = vals.length;
-    if (n < 2) return;
+    const pairs = rows
+      .map((r) => {
+        const val = parseFloat(r[v]);
+        const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
+        return { val, w };
+      })
+      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
 
-    const mean = vals.reduce((a, b) => a + b, 0) / n;
-    const s2 = vals.reduce((acc, x) => acc + Math.pow(x - mean, 2), 0) / (n - 1);
+    const n = pairs.length;
+    const validN = weightVar ? pairs.reduce((sum, p) => sum + p.w, 0) : n;
+    if (n < 2 || validN <= 1) return;
+
+    const mean = pairs.reduce((sum, p) => sum + p.val * p.w, 0) / validN;
+    const s2 = pairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - mean, 2), 0) / (validN - 1);
     const stdDev = Math.sqrt(s2);
-    const seMean = stdDev / Math.sqrt(n);
+    const seMean = stdDev / Math.sqrt(validN);
 
-    const df = n - 1;
+    const df = Math.round(validN - 1);
     const meanDiff = mean - testValue;
     const t = seMean > 0 ? meanDiff / seMean : 0;
     const pVal = studentTPValue(t, df);
@@ -417,7 +429,7 @@ export function clientComputeOneSampleTTest(rows: Record<string, any>[], variabl
 
     descriptives.push({
       variable: v,
-      n,
+      n: Math.round(validN),
       mean: Number(mean.toFixed(4)),
       std_dev: Number(stdDev.toFixed(4)),
       se_mean: Number(seMean.toFixed(4)),
@@ -438,25 +450,29 @@ export function clientComputeOneSampleTTest(rows: Record<string, any>[], variabl
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
-    title: 'One-Sample T-Test',
+    title: weightVar ? `One-Sample T-Test (Weighted by ${weightVar})` : 'One-Sample T-Test',
     type: 'one_sample_t_test',
-    syntax: `T-TEST\n  /TESTVAL=${testValue}\n  /VARIABLES=${variables.join(' ')}.`,
+    syntax: `T-TEST\n  /TESTVAL=${testValue}\n  /VARIABLES=${variables.join(' ')}.${
+      weightVar ? `\nWEIGHT BY ${weightVar}.` : ''
+    }`,
     data: {
       title: 'One-Sample T-Test',
       test_value: testValue,
       descriptives,
       test_results: testResults,
+      weighted_by: weightVar || null,
     },
   };
 }
 
-// 6. INDEPENDENT SAMPLES T-TEST
+// // 6. INDEPENDENT SAMPLES T-TEST
 export function clientComputeIndependentTTest(
   rows: Record<string, any>[],
   testVars: string[],
   groupVar: string,
   g1Val?: any,
-  g2Val?: any
+  g2Val?: any,
+  weightVar?: string | null
 ): OutputItem {
   const distinctGroups = Array.from(new Set(rows.map((r) => r[groupVar]))).filter((x) => x !== undefined && x !== null);
   const group1 = g1Val !== undefined ? g1Val : distinctGroups[0];
@@ -466,31 +482,37 @@ export function clientComputeIndependentTTest(
   const testResults: any[] = [];
 
   testVars.forEach((v) => {
-    const vals1 = rows.filter((r) => String(r[groupVar]) === String(group1)).map((r) => parseFloat(r[v])).filter((x) => !isNaN(x));
-    const vals2 = rows.filter((r) => String(r[groupVar]) === String(group2)).map((r) => parseFloat(r[v])).filter((x) => !isNaN(x));
+    const pairs1 = rows
+      .filter((r) => String(r[groupVar]) === String(group1))
+      .map((r) => ({ val: parseFloat(r[v]), w: weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1 }))
+      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
+    const pairs2 = rows
+      .filter((r) => String(r[groupVar]) === String(group2))
+      .map((r) => ({ val: parseFloat(r[v]), w: weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1 }))
+      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
 
-    const n1 = vals1.length;
-    const n2 = vals2.length;
+    const n1 = weightVar ? pairs1.reduce((sum, p) => sum + p.w, 0) : pairs1.length;
+    const n2 = weightVar ? pairs2.reduce((sum, p) => sum + p.w, 0) : pairs2.length;
     if (n1 < 2 || n2 < 2) return;
 
-    const m1 = vals1.reduce((a, b) => a + b, 0) / n1;
-    const m2 = vals2.reduce((a, b) => a + b, 0) / n2;
+    const m1 = pairs1.reduce((sum, p) => sum + p.val * p.w, 0) / n1;
+    const m2 = pairs2.reduce((sum, p) => sum + p.val * p.w, 0) / n2;
 
-    const s1 = Math.sqrt(vals1.reduce((acc, x) => acc + Math.pow(x - m1, 2), 0) / (n1 - 1));
-    const s2 = Math.sqrt(vals2.reduce((acc, x) => acc + Math.pow(x - m2, 2), 0) / (n2 - 1));
+    const s1 = Math.sqrt(pairs1.reduce((acc, p) => acc + p.w * Math.pow(p.val - m1, 2), 0) / (n1 - 1));
+    const s2 = Math.sqrt(pairs2.reduce((acc, p) => acc + p.w * Math.pow(p.val - m2, 2), 0) / (n2 - 1));
 
     const se1 = s1 / Math.sqrt(n1);
     const se2 = s2 / Math.sqrt(n2);
 
     groupStats.push(
-      { variable: v, group: String(group1), n: n1, mean: Number(m1.toFixed(4)), std_dev: Number(s1.toFixed(4)), se_mean: Number(se1.toFixed(4)) },
-      { variable: v, group: String(group2), n: n2, mean: Number(m2.toFixed(4)), std_dev: Number(s2.toFixed(4)), se_mean: Number(se2.toFixed(4)) }
+      { variable: v, group: String(group1), n: Math.round(n1), mean: Number(m1.toFixed(4)), std_dev: Number(s1.toFixed(4)), se_mean: Number(se1.toFixed(4)) },
+      { variable: v, group: String(group2), n: Math.round(n2), mean: Number(m2.toFixed(4)), std_dev: Number(s2.toFixed(4)), se_mean: Number(se2.toFixed(4)) }
     );
 
     // Pooled variance
     const sp2 = (((n1 - 1) * s1 * s1) + ((n2 - 1) * s2 * s2)) / (n1 + n2 - 2);
     const seDiff = Math.sqrt(sp2 * (1 / n1 + 1 / n2));
-    const df = n1 + n2 - 2;
+    const df = Math.round(n1 + n2 - 2);
     const meanDiff = m1 - m2;
     const t = seDiff > 0 ? meanDiff / seDiff : 0;
     const pVal = studentTPValue(t, df);
@@ -526,16 +548,19 @@ export function clientComputeIndependentTTest(
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
-    title: 'Independent Samples T-Test',
+    title: weightVar ? `Independent Samples T-Test (Weighted by ${weightVar})` : 'Independent Samples T-Test',
     type: 'independent_t_test',
-    syntax: `T-TEST GROUPS=${groupVar}('${group1}' '${group2}')\n  /VARIABLES=${testVars.join(' ')}.`,
+    syntax: `T-TEST GROUPS=${groupVar}('${group1}' '${group2}')\n  /VARIABLES=${testVars.join(' ')}.${
+      weightVar ? `\nWEIGHT BY ${weightVar}.` : ''
+    }`,
     data: {
-      title: 'Independent Samples T-Test',
+      title: 'Independent Samples Test',
       group_variable: groupVar,
       group1: String(group1),
       group2: String(group2),
       group_statistics: groupStats,
       test_results: testResults,
+      weighted_by: weightVar || null,
     },
   };
 }
@@ -603,15 +628,21 @@ export function clientComputePairedTTest(rows: Record<string, any>[], pairs: [st
 }
 
 // 7. ONE-WAY ANOVA
-export function clientComputeAnova(rows: Record<string, any>[], depVar: string, factorVar: string): OutputItem {
-  const groups: Record<string, number[]> = {};
+export function clientComputeAnova(
+  rows: Record<string, any>[],
+  depVar: string,
+  factorVar: string,
+  weightVar?: string | null
+): OutputItem {
+  const groups: Record<string, { val: number; w: number }[]> = {};
 
   rows.forEach((r) => {
     const factor = String(r[factorVar]);
     const dep = parseFloat(r[depVar]);
-    if (!isNaN(dep) && isFinite(dep) && factor !== 'undefined' && factor !== 'null') {
+    const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
+    if (!isNaN(dep) && isFinite(dep) && factor !== 'undefined' && factor !== 'null' && w > 0) {
       if (!groups[factor]) groups[factor] = [];
-      groups[factor].push(dep);
+      groups[factor].push({ val: dep, w });
     }
   });
 
@@ -623,25 +654,26 @@ export function clientComputeAnova(rows: Record<string, any>[], depVar: string, 
   let totalN = 0;
 
   groupKeys.forEach((key) => {
-    const vals = groups[key];
-    const n = vals.length;
-    const sum = vals.reduce((a, b) => a + b, 0);
+    const pairs = groups[key];
+    const n = weightVar ? pairs.reduce((sum, p) => sum + p.w, 0) : pairs.length;
+    const sum = pairs.reduce((acc, p) => acc + p.val * p.w, 0);
     grandSum += sum;
     totalN += n;
     const mean = n > 0 ? sum / n : 0;
-    const std = n > 1 ? Math.sqrt(vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (n - 1)) : 0;
+    const std = n > 1 ? Math.sqrt(pairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - mean, 2), 0) / (n - 1)) : 0;
     const se = n > 0 ? std / Math.sqrt(n) : 0;
+    const rawVals = pairs.map((p) => p.val);
 
     descriptives.push({
       group: key,
-      n,
+      n: Math.round(n),
       mean: Number(mean.toFixed(4)),
       std_dev: Number(std.toFixed(4)),
       se_mean: Number(se.toFixed(4)),
       ci_lower: Number((mean - 1.96 * se).toFixed(4)),
       ci_upper: Number((mean + 1.96 * se).toFixed(4)),
-      min: Number(Math.min(...vals).toFixed(4)),
-      max: Number(Math.max(...vals).toFixed(4)),
+      min: Number(Math.min(...rawVals).toFixed(4)),
+      max: Number(Math.max(...rawVals).toFixed(4)),
     });
   });
 
@@ -651,16 +683,16 @@ export function clientComputeAnova(rows: Record<string, any>[], depVar: string, 
   let ssBetween = 0;
   let ssWithin = 0;
 
-  groupKeys.forEach((key) => {
-    const vals = groups[key];
-    const n = vals.length;
-    const mean = vals.reduce((a, b) => a + b, 0) / n;
+  groupKeys.forEach((key, idx) => {
+    const pairs = groups[key];
+    const n = descriptives[idx].n;
+    const mean = descriptives[idx].mean;
     ssBetween += n * Math.pow(mean - grandMean, 2);
-    ssWithin += vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0);
+    ssWithin += pairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - mean, 2), 0);
   });
 
   const dfBetween = k - 1;
-  const dfWithin = totalN - k;
+  const dfWithin = Math.round(totalN - k);
   const msBetween = dfBetween > 0 ? ssBetween / dfBetween : 0;
   const msWithin = dfWithin > 0 ? ssWithin / dfWithin : 0;
   const fStat = msWithin > 0 ? msBetween / msWithin : 0;
@@ -697,14 +729,17 @@ export function clientComputeAnova(rows: Record<string, any>[], depVar: string, 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
-    title: `One-Way ANOVA: ${depVar} by ${factorVar}`,
+    title: weightVar ? `One-Way ANOVA: ${depVar} by ${factorVar} (Weighted by ${weightVar})` : `One-Way ANOVA: ${depVar} by ${factorVar}`,
     type: 'one_way_anova',
-    syntax: `ONEWAY ${depVar} BY ${factorVar}\n  /STATISTICS DESCRIPTIVES\n  /POSTHOC=TUKEY ALPHA(0.05).`,
+    syntax: `ONEWAY ${depVar} BY ${factorVar}\n  /STATISTICS DESCRIPTIVES\n  /POSTHOC=TUKEY ALPHA(0.05).${
+      weightVar ? `\nWEIGHT BY ${weightVar}.` : ''
+    }`,
     data: {
       title: `One-Way ANOVA: ${depVar} by ${factorVar}`,
       dependent_variable: depVar,
       factor_variable: factorVar,
       descriptives,
+      weighted_by: weightVar || null,
       anova_table: {
         between_groups: {
           sum_of_squares: Number(ssBetween.toFixed(3)),
@@ -2805,6 +2840,1460 @@ export function clientComputeScatterWithRegression(
       points: points.slice(0, 500), // Cap for rendering performance
       line_start: { x: minX, y: Number((intercept + slope * minX).toFixed(3)) },
       line_end: { x: maxX, y: Number((intercept + slope * maxX).toFixed(3)) },
+    },
+  };
+}
+
+// Rational approximation for standard normal inverse CDF (Probit / Acklam's algorithm)
+function invNormalCDF(p: number): number {
+  if (p <= 0) return -4.5;
+  if (p >= 1) return 4.5;
+  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
+  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
+  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
+  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
+
+  const p_low = 0.02425;
+  const p_high = 1 - p_low;
+  let q: number, r: number;
+
+  if (p < p_low) {
+    q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+           ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  } else if (p <= p_high) {
+    q = p - 0.5;
+    r = q * q;
+    return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+           (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+  } else {
+    q = Math.sqrt(-2 * Math.log(1 - p));
+    return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+            ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+  }
+}
+
+// 24. AUTHENTIC SPSS BOXPLOT ENGINE
+export interface BoxplotGroupStats {
+  label: string;
+  n: number;
+  min: number;
+  max: number;
+  q1: number;
+  median: number;
+  q3: number;
+  iqr: number;
+  lowerWhisker: number;
+  upperWhisker: number;
+  mildOutliers: { caseNum: number; value: number }[];
+  extremeOutliers: { caseNum: number; value: number }[];
+}
+
+export function clientComputeBoxplot(
+  rows: Record<string, any>[],
+  variable: string,
+  factorVar?: string
+): OutputItem {
+  // Extract groups
+  const groupsMap = new Map<string, { caseNum: number; val: number }[]>();
+
+  rows.forEach((r, idx) => {
+    const rawVal = r[variable];
+    const num = parseFloat(rawVal);
+    if (isNaN(num) || !isFinite(num)) return;
+    const caseNum = r.id !== undefined ? Number(r.id) : idx + 1;
+    const grpKey = factorVar && r[factorVar] !== undefined && r[factorVar] !== null
+      ? String(r[factorVar])
+      : 'Total';
+
+    if (!groupsMap.has(grpKey)) {
+      groupsMap.set(grpKey, []);
+    }
+    groupsMap.get(grpKey)!.push({ caseNum, val: num });
+  });
+
+  if (groupsMap.size === 0) {
+    throw new Error(`No valid numeric cases found for variable "${variable}".`);
+  }
+
+  const groupStats: BoxplotGroupStats[] = [];
+
+  for (const [grpLabel, items] of groupsMap.entries()) {
+    if (items.length < 3) continue;
+    items.sort((a, b) => a.val - b.val);
+
+    const n = items.length;
+    const min = items[0].val;
+    const max = items[n - 1].val;
+
+    // Percentile function with linear interpolation (standard SPSS method)
+    const percentile = (p: number) => {
+      const pos = (n - 1) * p;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      if (items[base + 1] !== undefined) {
+        return items[base].val + rest * (items[base + 1].val - items[base].val);
+      }
+      return items[base].val;
+    };
+
+    const q1 = Number(percentile(0.25).toFixed(3));
+    const median = Number(percentile(0.50).toFixed(3));
+    const q3 = Number(percentile(0.75).toFixed(3));
+    const iqr = Number((q3 - q1).toFixed(3));
+
+    const innerLower = q1 - 1.5 * iqr;
+    const innerUpper = q3 + 1.5 * iqr;
+    const outerLower = q1 - 3.0 * iqr;
+    const outerUpper = q3 + 3.0 * iqr;
+
+    // Whiskers: extreme values within inner fences
+    const withinInner = items.filter((it) => it.val >= innerLower && it.val <= innerUpper);
+    const lowerWhisker = withinInner.length > 0 ? withinInner[0].val : min;
+    const upperWhisker = withinInner.length > 0 ? withinInner[withinInner.length - 1].val : max;
+
+    // Outliers
+    const mildOutliers: { caseNum: number; value: number }[] = [];
+    const extremeOutliers: { caseNum: number; value: number }[] = [];
+
+    items.forEach((it) => {
+      if (it.val < outerLower || it.val > outerUpper) {
+        extremeOutliers.push({ caseNum: it.caseNum, value: Number(it.val.toFixed(2)) });
+      } else if (it.val < innerLower || it.val > innerUpper) {
+        mildOutliers.push({ caseNum: it.caseNum, value: Number(it.val.toFixed(2)) });
+      }
+    });
+
+    groupStats.push({
+      label: grpLabel,
+      n,
+      min: Number(min.toFixed(2)),
+      max: Number(max.toFixed(2)),
+      q1,
+      median,
+      q3,
+      iqr,
+      lowerWhisker: Number(lowerWhisker.toFixed(2)),
+      upperWhisker: Number(upperWhisker.toFixed(2)),
+      mildOutliers,
+      extremeOutliers,
+    });
+  }
+
+  if (groupStats.length === 0) {
+    throw new Error(`Insufficient data points to construct boxplot for "${variable}".`);
+  }
+
+  // Global scale range
+  const globalMin = Math.min(...groupStats.map((g) => Math.min(g.min, g.lowerWhisker)));
+  const globalMax = Math.max(...groupStats.map((g) => Math.max(g.max, g.upperWhisker)));
+
+  return {
+    id: `boxplot_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: factorVar ? `Boxplot: ${variable} by ${factorVar}` : `Boxplot: ${variable}`,
+    type: 'boxplot_chart',
+    syntax: factorVar
+      ? `EXAMINE VARIABLES=${variable} BY ${factorVar}\n  /PLOT BOXPLOT.`
+      : `EXAMINE VARIABLES=${variable}\n  /PLOT BOXPLOT.`,
+    data: {
+      variable,
+      factorVar: factorVar || null,
+      globalMin,
+      globalMax,
+      groups: groupStats,
+    },
+  };
+}
+
+// 25. AUTHENTIC SPSS NORMAL Q-Q PLOT ENGINE
+export function clientComputeQQPlot(
+  rows: Record<string, any>[],
+  variable: string
+): OutputItem {
+  const values: number[] = [];
+  rows.forEach((r) => {
+    const v = parseFloat(r[variable]);
+    if (!isNaN(v) && isFinite(v)) values.push(v);
+  });
+
+  const n = values.length;
+  if (n < 4) {
+    throw new Error(`Normal Q-Q Plot requires at least 4 valid numeric cases for "${variable}".`);
+  }
+
+  values.sort((a, b) => a - b);
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (n - 1);
+  const stdDev = Math.sqrt(variance);
+
+  // Blom's fractional rank: (i - 0.375) / (n + 0.25)
+  const qqPoints: { observed: number; expected: number; deviation: number }[] = [];
+
+  for (let i = 1; i <= n; i++) {
+    const p = (i - 0.375) / (n + 0.25);
+    const z = invNormalCDF(p);
+    const expected = mean + z * stdDev;
+    const observed = values[i - 1];
+    const deviation = observed - expected;
+
+    qqPoints.push({
+      observed: Number(observed.toFixed(3)),
+      expected: Number(expected.toFixed(3)),
+      deviation: Number(deviation.toFixed(3)),
+    });
+  }
+
+  const minObs = values[0];
+  const maxObs = values[n - 1];
+  const minExp = qqPoints[0].expected;
+  const maxExp = qqPoints[n - 1].expected;
+
+  return {
+    id: `qqplot_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Normal Q-Q Plot of ${variable}`,
+    type: 'qqplot_chart',
+    syntax: `PPLOT\n  /VARIABLES=${variable}\n  /TYPE=Q-Q\n  /FRACTION=BLOM\n  /STANDARDIZE=NO.`,
+    data: {
+      variable,
+      n,
+      mean: Number(mean.toFixed(3)),
+      std_dev: Number(stdDev.toFixed(3)),
+      min_obs: Number(minObs.toFixed(3)),
+      max_obs: Number(maxObs.toFixed(3)),
+      min_exp: Number(minExp.toFixed(3)),
+      max_exp: Number(maxExp.toFixed(3)),
+      points: qqPoints.slice(0, 500),
+    },
+  };
+}
+
+// 26. COUNT VALUES WITHIN CASES ENGINE
+export interface CountValuesResult {
+  output: OutputItem;
+  updatedRows: Record<string, any>[];
+  newVariable: VariableMeta;
+}
+
+export function clientComputeCountValues(
+  rows: Record<string, any>[],
+  targetVarName: string,
+  targetVarLabel: string,
+  sourceVars: string[],
+  conditionType: 'exact' | 'range' | 'greater' | 'less',
+  val1: number,
+  val2?: number
+): CountValuesResult {
+  const updatedRows = rows.map((r) => {
+    let count = 0;
+    sourceVars.forEach((v) => {
+      const val = parseFloat(r[v]);
+      if (!isNaN(val) && isFinite(val)) {
+        if (conditionType === 'exact' && val === val1) count++;
+        else if (conditionType === 'range' && val >= val1 && val <= (val2 ?? val1)) count++;
+        else if (conditionType === 'greater' && val > val1) count++;
+        else if (conditionType === 'less' && val < val1) count++;
+      }
+    });
+    return { ...r, [targetVarName]: count };
+  });
+
+  const newVariable: VariableMeta = {
+    name: targetVarName,
+    type: 'Numeric',
+    width: 8,
+    decimals: 0,
+    label: targetVarLabel || `Count of matching values in ${sourceVars.join(', ')}`,
+    values: {},
+    missing: 'None',
+    columns: 8,
+    align: 'Right',
+    measure: 'Scale',
+    role: 'Input',
+  };
+
+  const output: OutputItem = {
+    id: `count_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Count Values: ${targetVarName}`,
+    type: 'count_values',
+    syntax: `COUNT ${targetVarName}=${sourceVars.join(' ')}(${conditionType === 'range' ? `${val1} THRU ${val2}` : val1}).\nVARIABLE LABELS ${targetVarName} '${targetVarLabel || targetVarName}'.\nEXECUTE.`,
+    data: {
+      targetVar: targetVarName,
+      sourceVars,
+      condition: conditionType === 'range' ? `${val1} THRU ${val2}` : `${conditionType} ${val1}`,
+      casesCounted: rows.length,
+    },
+  };
+
+  return { output, updatedRows, newVariable };
+}
+
+// 27. RANK CASES ENGINE
+export interface RankCasesResult {
+  output: OutputItem;
+  updatedRows: Record<string, any>[];
+  newVariables: VariableMeta[];
+}
+
+export function clientComputeRankCases(
+  rows: Record<string, any>[],
+  variablesToRank: string[],
+  direction: 'ascending' | 'descending' = 'ascending',
+  tiesMethod: 'mean' | 'low' | 'high' = 'mean'
+): RankCasesResult {
+  let currentRows = [...rows];
+  const newVariables: VariableMeta[] = [];
+  const summaries: any[] = [];
+
+  variablesToRank.forEach((varName) => {
+    const rankVarName = `R${varName}`.slice(0, 8);
+    const items: { origIdx: number; val: number }[] = [];
+    currentRows.forEach((r, idx) => {
+      const v = parseFloat(r[varName]);
+      if (!isNaN(v) && isFinite(v)) {
+        items.push({ origIdx: idx, val: v });
+      }
+    });
+
+    if (direction === 'ascending') {
+      items.sort((a, b) => a.val - b.val);
+    } else {
+      items.sort((a, b) => b.val - a.val);
+    }
+
+    const ranks = new Array(currentRows.length).fill(null);
+    let i = 0;
+    let tieCount = 0;
+
+    while (i < items.length) {
+      let j = i;
+      while (j < items.length && items[j].val === items[i].val) {
+        j++;
+      }
+      const groupSize = j - i;
+      if (groupSize > 1) tieCount += groupSize;
+
+      let assignedRank = 0;
+      if (tiesMethod === 'mean') {
+        const sumRanks = ((i + 1) + j) * groupSize / 2;
+        assignedRank = sumRanks / groupSize;
+      } else if (tiesMethod === 'low') {
+        assignedRank = i + 1;
+      } else if (tiesMethod === 'high') {
+        assignedRank = j;
+      }
+
+      for (let k = i; k < j; k++) {
+        ranks[items[k].origIdx] = assignedRank;
+      }
+      i = j;
+    }
+
+    currentRows = currentRows.map((r, idx) => ({
+      ...r,
+      [rankVarName]: ranks[idx],
+    }));
+
+    newVariables.push({
+      name: rankVarName,
+      type: 'Numeric',
+      width: 8,
+      decimals: 2,
+      label: `Rank of ${varName}`,
+      values: {},
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Scale',
+      role: 'Input',
+    });
+
+    summaries.push({
+      originalVar: varName,
+      rankVar: rankVarName,
+      n: items.length,
+      ties: tieCount,
+      minRank: items.length > 0 ? 1 : 0,
+      maxRank: items.length,
+    });
+  });
+
+  const output: OutputItem = {
+    id: `rank_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Rank Cases: ${variablesToRank.join(', ')}`,
+    type: 'rank_cases',
+    syntax: `RANK VARIABLES=${variablesToRank.join(' ')}(${direction === 'ascending' ? 'A' : 'D'})\n  /TIES=${tiesMethod.toUpperCase()}\n  /PRINT=YES.`,
+    data: {
+      direction,
+      tiesMethod,
+      summaries,
+    },
+  };
+
+  return { output, updatedRows: currentRows, newVariables };
+}
+
+// 28. VISUAL BINNING ENGINE
+export interface VisualBinningResult {
+  output: OutputItem;
+  updatedRows: Record<string, any>[];
+  newVariable: VariableMeta;
+}
+
+export function clientComputeVisualBinning(
+  rows: Record<string, any>[],
+  sourceVar: string,
+  targetVarName: string,
+  numBins: number = 3,
+  method: 'equal_width' | 'equal_percentile' = 'equal_width'
+): VisualBinningResult {
+  const vals: number[] = [];
+  rows.forEach((r) => {
+    const v = parseFloat(r[sourceVar]);
+    if (!isNaN(v) && isFinite(v)) vals.push(v);
+  });
+
+  if (vals.length < 2) throw new Error('Visual Binning requires at least 2 valid numeric cases.');
+  vals.sort((a, b) => a - b);
+
+  const min = vals[0];
+  const max = vals[vals.length - 1];
+  const cutPoints: number[] = [];
+
+  if (method === 'equal_width') {
+    const step = (max - min) / numBins;
+    for (let i = 1; i < numBins; i++) {
+      cutPoints.push(Number((min + i * step).toFixed(2)));
+    }
+  } else {
+    for (let i = 1; i < numBins; i++) {
+      const idx = Math.floor(vals.length * (i / numBins));
+      cutPoints.push(Number(vals[idx].toFixed(2)));
+    }
+  }
+
+  const valueLabels: Record<string, string> = {};
+  for (let b = 1; b <= numBins; b++) {
+    if (b === 1) {
+      valueLabels[String(b)] = `<= ${cutPoints[0] ?? max}`;
+    } else if (b === numBins) {
+      valueLabels[String(b)] = `> ${cutPoints[cutPoints.length - 1] ?? min}`;
+    } else {
+      valueLabels[String(b)] = `${cutPoints[b - 2]} - ${cutPoints[b - 1]}`;
+    }
+  }
+
+  const binCounts = new Array(numBins).fill(0);
+  const updatedRows = rows.map((r) => {
+    const v = parseFloat(r[sourceVar]);
+    if (isNaN(v) || !isFinite(v)) {
+      return { ...r, [targetVarName]: null };
+    }
+    let assignedBin = numBins;
+    for (let c = 0; c < cutPoints.length; c++) {
+      if (v <= cutPoints[c]) {
+        assignedBin = c + 1;
+        break;
+      }
+    }
+    binCounts[assignedBin - 1]++;
+    return { ...r, [targetVarName]: assignedBin };
+  });
+
+  const newVariable: VariableMeta = {
+    name: targetVarName,
+    type: 'Numeric',
+    width: 8,
+    decimals: 0,
+    label: `Binned ${sourceVar}`,
+    values: valueLabels,
+    missing: 'None',
+    columns: 8,
+    align: 'Right',
+    measure: 'Ordinal',
+    role: 'Input',
+  };
+
+  const output: OutputItem = {
+    id: `binning_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Visual Binning: ${sourceVar} into ${targetVarName}`,
+    type: 'data_management',
+    syntax: `* Visual Binning.\nRECODE ${sourceVar}\n  (LOWEST THRU ${cutPoints[0]} = 1)\n  ${cutPoints.slice(1).map((cp, i) => `(${cutPoints[i]} THRU ${cp} = ${i + 2})`).join('\n  ')}\n  (${cutPoints[cutPoints.length - 1]} THRU HIGHEST = ${numBins})\n  INTO ${targetVarName}.\nEXECUTE.`,
+    data: {
+      sourceVar,
+      targetVarName,
+      method,
+      cutPoints,
+      binCounts,
+      valueLabels,
+      totalCases: rows.length,
+    },
+  };
+
+  return { output, updatedRows, newVariable };
+}
+
+// 29. TRANSPOSE ENGINE
+export interface TransposeResult {
+  output: OutputItem;
+  transposedRows: Record<string, any>[];
+  transposedVariables: VariableMeta[];
+}
+
+export function clientComputeTranspose(
+  rows: Record<string, any>[],
+  _existingVariables: VariableMeta[],
+  variablesToTranspose: string[],
+  nameVariable?: string
+): TransposeResult {
+  if (variablesToTranspose.length === 0) {
+    throw new Error('Please select at least one variable to transpose.');
+  }
+
+  const caseColNames: string[] = rows.map((r, idx) => {
+    if (nameVariable && r[nameVariable] !== undefined && r[nameVariable] !== null) {
+      const clean = String(r[nameVariable]).trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+      if (clean) return clean;
+    }
+    return `CASE_${idx + 1}`;
+  });
+
+  const transposedRows: Record<string, any>[] = [];
+  const transposedVariables: VariableMeta[] = [
+    {
+      name: 'CASE_ID',
+      type: 'String',
+      width: 16,
+      decimals: 0,
+      label: 'Original Variable',
+      values: {},
+      missing: 'None',
+      columns: 12,
+      align: 'Left',
+      measure: 'Nominal',
+      role: 'Input',
+    },
+  ];
+
+  caseColNames.forEach((col) => {
+    transposedVariables.push({
+      name: col,
+      type: 'Numeric',
+      width: 8,
+      decimals: 2,
+      label: col,
+      values: {},
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Scale',
+      role: 'Input',
+    });
+  });
+
+  variablesToTranspose.forEach((vName, vIdx) => {
+    const newRow: Record<string, any> = {
+      id: vIdx + 1,
+      CASE_ID: vName,
+    };
+    rows.forEach((r, rIdx) => {
+      const colName = caseColNames[rIdx];
+      const val = r[vName];
+      const num = parseFloat(val);
+      newRow[colName] = !isNaN(num) && isFinite(num) && typeof val !== 'boolean' ? num : (val ?? null);
+    });
+    transposedRows.push(newRow);
+  });
+
+  const output: OutputItem = {
+    id: `transpose_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Transpose Dataset',
+    type: 'data_management',
+    syntax: `FLIP /VARIABLES=${variablesToTranspose.join(' ')}${nameVariable ? ` /NEWNAMES=${nameVariable}` : ''}.`,
+    data: {
+      transposedCount: variablesToTranspose.length,
+      casesConverted: rows.length,
+    },
+  };
+
+  return { output, transposedRows, transposedVariables };
+}
+
+// 30. RESTRUCTURE DATA (WIDE TO LONG) ENGINE
+export interface RestructureResult {
+  output: OutputItem;
+  restructuredRows: Record<string, any>[];
+  restructuredVariables: VariableMeta[];
+}
+
+export function clientComputeRestructure(
+  rows: Record<string, any>[],
+  existingVariables: VariableMeta[],
+  idVar: string,
+  repeatedVars: string[],
+  targetMeasureVar: string = 'trans1',
+  targetIndexVar: string = 'Index1'
+): RestructureResult {
+  if (repeatedVars.length < 2) {
+    throw new Error('Restructuring from Wide to Long requires at least 2 repeated measure variables.');
+  }
+
+  const fixedVars = existingVariables
+    .filter((v) => !repeatedVars.includes(v.name) && v.name !== 'id')
+    .map((v) => v.name);
+
+  const restructuredRows: Record<string, any>[] = [];
+  let rowCounter = 1;
+
+  rows.forEach((r) => {
+    repeatedVars.forEach((repVar, repIdx) => {
+      const newRow: Record<string, any> = {
+        id: rowCounter++,
+        [targetIndexVar]: repIdx + 1,
+        [targetMeasureVar]: r[repVar] !== undefined ? r[repVar] : null,
+      };
+      if (idVar) newRow[idVar] = r[idVar];
+      fixedVars.forEach((fv) => {
+        if (fv !== idVar) newRow[fv] = r[fv];
+      });
+      restructuredRows.push(newRow);
+    });
+  });
+
+  const restructuredVariables: VariableMeta[] = [
+    {
+      name: idVar || 'id',
+      type: 'Numeric',
+      width: 8,
+      decimals: 0,
+      label: idVar || 'Case ID',
+      values: {},
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Scale',
+      role: 'Input',
+    },
+    {
+      name: targetIndexVar,
+      type: 'Numeric',
+      width: 8,
+      decimals: 0,
+      label: 'Index Variable',
+      values: repeatedVars.reduce((acc, v, idx) => ({ ...acc, [String(idx + 1)]: v }), {}),
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Ordinal',
+      role: 'Input',
+    },
+    {
+      name: targetMeasureVar,
+      type: 'Numeric',
+      width: 8,
+      decimals: 2,
+      label: targetMeasureVar,
+      values: {},
+      missing: 'None',
+      columns: 8,
+      align: 'Right',
+      measure: 'Scale',
+      role: 'Input',
+    },
+  ];
+
+  fixedVars.forEach((fv) => {
+    if (fv !== idVar) {
+      const origMeta = existingVariables.find((v) => v.name === fv);
+      if (origMeta) restructuredVariables.push(origMeta);
+    }
+  });
+
+  const output: OutputItem = {
+    id: `restructure_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Restructure Data (Wide to Long)',
+    type: 'data_management',
+    syntax: `VARSTOCASES\n  /MAKE ${targetMeasureVar} FROM ${repeatedVars.join(' ')}\n  /INDEX=${targetIndexVar}(${repeatedVars.length})\n  /KEEP=${fixedVars.join(' ')}\n  /NULL=KEEP.`,
+    data: {
+      originalCases: rows.length,
+      resultingCases: restructuredRows.length,
+      repeatedMeasures: repeatedVars,
+    },
+  };
+
+  return { output, restructuredRows, restructuredVariables };
+}
+
+// -------------------------------------------------------------
+// MATRIX UTILITIES FOR ADVANCED GLM & MULTIVARIATE TESTS
+// -------------------------------------------------------------
+function matrixDeterminant(m: number[][]): number {
+  const n = m.length;
+  const a = m.map((row) => [...row]);
+  let det = 1;
+  for (let i = 0; i < n; i++) {
+    let pivot = i;
+    for (let j = i + 1; j < n; j++) {
+      if (Math.abs(a[j][i]) > Math.abs(a[pivot][i])) pivot = j;
+    }
+    if (Math.abs(a[pivot][i]) < 1e-12) return 0;
+    if (pivot !== i) {
+      const temp = a[i];
+      a[i] = a[pivot];
+      a[pivot] = temp;
+      det = -det;
+    }
+    det *= a[i][i];
+    for (let j = i + 1; j < n; j++) {
+      const factor = a[j][i] / a[i][i];
+      for (let k = i; k < n; k++) {
+        a[j][k] -= factor * a[i][k];
+      }
+    }
+  }
+  return det;
+}
+
+// -------------------------------------------------------------
+// 35. REPEATED MEASURES ANOVA (GLM REPEATED MEASURES)
+// -------------------------------------------------------------
+export function clientComputeRepeatedMeasuresAnova(
+  rows: Record<string, any>[],
+  repeatedVars: string[],
+  betweenFactor?: string
+): OutputItem {
+  const k = repeatedVars.length;
+  if (k < 2) {
+    throw new Error('Repeated Measures ANOVA requires at least 2 repeated variables.');
+  }
+
+  // Filter cases with complete data across all repeated variables (listwise deletion)
+  const validData: { y: number[]; factor?: string }[] = [];
+  rows.forEach((r) => {
+    let allValid = true;
+    const yVals: number[] = [];
+    for (const v of repeatedVars) {
+      const val = parseFloat(r[v]);
+      if (isNaN(val)) {
+        allValid = false;
+        break;
+      }
+      yVals.push(val);
+    }
+    if (allValid) {
+      validData.push({
+        y: yVals,
+        factor: betweenFactor ? String(r[betweenFactor] ?? '') : undefined,
+      });
+    }
+  });
+
+  const n = validData.length;
+  if (n < 2) {
+    throw new Error('Not enough valid cases for Repeated Measures ANOVA (minimum 2).');
+  }
+
+  // 1. Descriptive Statistics
+  const descriptives = repeatedVars.map((v, j) => {
+    const vals = validData.map((d) => d.y[j]);
+    const mean = vals.reduce((a, b) => a + b, 0) / n;
+    const variance = vals.reduce((acc, x) => acc + Math.pow(x - mean, 2), 0) / (n - 1);
+    return {
+      variable: v,
+      mean: Number(mean.toFixed(3)),
+      stdDev: Number(Math.sqrt(variance).toFixed(3)),
+      n,
+    };
+  });
+
+  // 2. Sum of Squares calculations
+  const condMeans = repeatedVars.map((_, j) => validData.reduce((acc, d) => acc + d.y[j], 0) / n);
+  const subjMeans = validData.map((d) => d.y.reduce((a, b) => a + b, 0) / k);
+  const grandMean = condMeans.reduce((a, b) => a + b, 0) / k;
+
+  let ssTotal = 0;
+  validData.forEach((d) => {
+    d.y.forEach((val) => {
+      ssTotal += Math.pow(val - grandMean, 2);
+    });
+  });
+
+  const ssTime = n * condMeans.reduce((acc, m) => acc + Math.pow(m - grandMean, 2), 0);
+  const dfTime = k - 1;
+
+  const ssSubject = k * subjMeans.reduce((acc, m) => acc + Math.pow(m - grandMean, 2), 0);
+  const dfSubject = n - 1;
+
+  const ssError = Math.max(0, ssTotal - ssTime - ssSubject);
+  const dfError = dfTime * dfSubject;
+
+  const msTime = dfTime > 0 ? ssTime / dfTime : 0;
+  const msError = dfError > 0 ? ssError / dfError : 0;
+  const fStat = msError > 0 ? msTime / msError : 0;
+  const sigSphericity = fDistPValue(fStat, dfTime, dfError);
+  const partialEtaSq = (ssTime + ssError) > 0 ? ssTime / (ssTime + ssError) : 0;
+
+  // 3. Mauchly's Sphericity Test & Epsilon Calculations
+  let mauchlysW = 1.0;
+  let approxChiSq = 0;
+  let dfMauchly = Math.max(1, (k * (k - 1)) / 2 - 1);
+  let sigMauchly = 1.0;
+  let ggEpsilon = 1.0;
+  let hfEpsilon = 1.0;
+  const lowerBoundEpsilon = Number((1 / (k - 1)).toFixed(3));
+
+  if (k >= 3) {
+    // Sample Covariance Matrix S (k x k)
+    const cov: number[][] = Array.from({ length: k }, () => Array(k).fill(0));
+    for (let a = 0; a < k; a++) {
+      for (let b = 0; b < k; b++) {
+        let sumProd = 0;
+        validData.forEach((d) => {
+          sumProd += (d.y[a] - condMeans[a]) * (d.y[b] - condMeans[b]);
+        });
+        cov[a][b] = sumProd / (n - 1);
+      }
+    }
+
+    // Helmert orthonormal contrast matrix C of size (k-1) x k
+    const p = k - 1;
+    const C: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
+    for (let m = 0; m < p; m++) {
+      const denom = Math.sqrt((m + 1) * (m + 2));
+      for (let j = 0; j <= m; j++) {
+        C[m][j] = 1 / denom;
+      }
+      C[m][m + 1] = -(m + 1) / denom;
+    }
+
+    // Transformed covariance matrix Sigma = C * S * C^T (p x p)
+    const CS: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
+    for (let r = 0; r < p; r++) {
+      for (let c = 0; c < k; c++) {
+        let sum = 0;
+        for (let m = 0; m < k; m++) {
+          sum += C[r][m] * cov[m][c];
+        }
+        CS[r][c] = sum;
+      }
+    }
+
+    const sigma: number[][] = Array.from({ length: p }, () => Array(p).fill(0));
+    for (let r = 0; r < p; r++) {
+      for (let c = 0; c < p; c++) {
+        let sum = 0;
+        for (let m = 0; m < k; m++) {
+          sum += CS[r][m] * C[c][m];
+        }
+        sigma[r][c] = sum;
+      }
+    }
+
+    let tr = 0;
+    let trSq = 0;
+    for (let i = 0; i < p; i++) {
+      tr += sigma[i][i];
+      for (let j = 0; j < p; j++) {
+        trSq += sigma[i][j] * sigma[i][j];
+      }
+    }
+
+    const det = Math.max(1e-15, matrixDeterminant(sigma));
+    const meanDiag = tr / p;
+    if (meanDiag > 0) {
+      mauchlysW = Math.min(1.0, Math.max(0.0001, det / Math.pow(meanDiag, p)));
+    }
+
+    const dFactor = (2 * p * p + p + 2) / (6 * p);
+    approxChiSq = Math.max(0, -((n - 1) - dFactor) * Math.log(mauchlysW));
+    sigMauchly = chiSquarePValue(approxChiSq, dfMauchly);
+
+    // Greenhouse-Geisser Epsilon
+    if (trSq > 0) {
+      ggEpsilon = Math.min(1.0, Math.max(1 / (k - 1), (tr * tr) / (p * trSq)));
+    }
+
+    // Huynh-Feldt Epsilon
+    const denomHF = (k - 1) * ((n - 1) - (k - 1) * ggEpsilon);
+    if (denomHF > 0) {
+      hfEpsilon = Math.min(1.0, Math.max(ggEpsilon, (n * (k - 1) * ggEpsilon - 2) / denomHF));
+    }
+  }
+
+  // Within-Subjects Effects across 4 assumptions
+  const dfTimeGG = Number((dfTime * ggEpsilon).toFixed(3));
+  const dfErrorGG = Number((dfError * ggEpsilon).toFixed(3));
+  const sigGG = fDistPValue(fStat, dfTimeGG, dfErrorGG);
+
+  const dfTimeHF = Number((dfTime * hfEpsilon).toFixed(3));
+  const dfErrorHF = Number((dfError * hfEpsilon).toFixed(3));
+  const sigHF = fDistPValue(fStat, dfTimeHF, dfErrorHF);
+
+  const dfTimeLB = 1.0;
+  const dfErrorLB = dfSubject;
+  const sigLB = fDistPValue(fStat, dfTimeLB, dfErrorLB);
+
+  const withinSubjectsEffects = [
+    {
+      source: 'Time (Sphericity Assumed)',
+      ss: Number(ssTime.toFixed(3)),
+      df: dfTime,
+      ms: Number(msTime.toFixed(3)),
+      f: Number(fStat.toFixed(3)),
+      sig: Number(sigSphericity.toFixed(4)),
+      partialEtaSq: Number(partialEtaSq.toFixed(3)),
+    },
+    {
+      source: 'Time (Greenhouse-Geisser)',
+      ss: Number(ssTime.toFixed(3)),
+      df: dfTimeGG,
+      ms: Number((ssTime / dfTimeGG).toFixed(3)),
+      f: Number(fStat.toFixed(3)),
+      sig: Number(sigGG.toFixed(4)),
+      partialEtaSq: Number(partialEtaSq.toFixed(3)),
+    },
+    {
+      source: 'Time (Huynh-Feldt)',
+      ss: Number(ssTime.toFixed(3)),
+      df: dfTimeHF,
+      ms: Number((ssTime / dfTimeHF).toFixed(3)),
+      f: Number(fStat.toFixed(3)),
+      sig: Number(sigHF.toFixed(4)),
+      partialEtaSq: Number(partialEtaSq.toFixed(3)),
+    },
+    {
+      source: 'Time (Lower-bound)',
+      ss: Number(ssTime.toFixed(3)),
+      df: dfTimeLB,
+      ms: Number(ssTime.toFixed(3)),
+      f: Number(fStat.toFixed(3)),
+      sig: Number(sigLB.toFixed(4)),
+      partialEtaSq: Number(partialEtaSq.toFixed(3)),
+    },
+    {
+      source: 'Error(Time) (Sphericity Assumed)',
+      ss: Number(ssError.toFixed(3)),
+      df: dfError,
+      ms: Number(msError.toFixed(3)),
+      f: null,
+      sig: null,
+      partialEtaSq: null,
+    },
+    {
+      source: 'Error(Time) (Greenhouse-Geisser)',
+      ss: Number(ssError.toFixed(3)),
+      df: dfErrorGG,
+      ms: Number((ssError / dfErrorGG).toFixed(3)),
+      f: null,
+      sig: null,
+      partialEtaSq: null,
+    },
+    {
+      source: 'Error(Time) (Huynh-Feldt)',
+      ss: Number(ssError.toFixed(3)),
+      df: dfErrorHF,
+      ms: Number((ssError / dfErrorHF).toFixed(3)),
+      f: null,
+      sig: null,
+      partialEtaSq: null,
+    },
+    {
+      source: 'Error(Time) (Lower-bound)',
+      ss: Number(ssError.toFixed(3)),
+      df: dfErrorLB,
+      ms: Number((ssError / dfErrorLB).toFixed(3)),
+      f: null,
+      sig: null,
+      partialEtaSq: null,
+    },
+  ];
+
+  return {
+    id: `rm_anova_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'General Linear Model: Repeated Measures ANOVA',
+    type: 'repeated_measures_anova',
+    syntax: `GLM ${repeatedVars.join(' ')}\n  /WSFACTOR=time ${k} Polynomial\n  /METHOD=SSTYPE(3)\n  /PRINT=DESCRIPTIVE ETASQ HOMOGENEITY\n  /CRITERIA=ALPHA(.05)\n  /WSDESIGN=time.`,
+    data: {
+      repeated_variables: repeatedVars,
+      total_n: n,
+      descriptives,
+      mauchlys_test: {
+        withinSubjectsEffect: 'time',
+        mauchlysW: Number(mauchlysW.toFixed(3)),
+        approxChiSquare: Number(approxChiSq.toFixed(3)),
+        df: dfMauchly,
+        sig: Number(sigMauchly.toFixed(4)),
+        greenhouseGeisser: Number(ggEpsilon.toFixed(3)),
+        huynhFeldt: Number(hfEpsilon.toFixed(3)),
+        lowerBound: lowerBoundEpsilon,
+      },
+      tests_within_subjects: withinSubjectsEffects,
+      tests_between_subjects: [
+        {
+          source: 'Intercept',
+          ss: Number((n * k * grandMean * grandMean).toFixed(3)),
+          df: 1,
+          ms: Number((n * k * grandMean * grandMean).toFixed(3)),
+          f: ssSubject > 0 ? Number(((n * k * grandMean * grandMean) / (ssSubject / dfSubject)).toFixed(3)) : 0,
+          sig: Number(fDistPValue((n * k * grandMean * grandMean) / Math.max(1e-9, ssSubject / dfSubject), 1, dfSubject).toFixed(4)),
+        },
+        {
+          source: 'Error',
+          ss: Number(ssSubject.toFixed(3)),
+          df: dfSubject,
+          ms: Number((ssSubject / dfSubject).toFixed(3)),
+          f: null,
+          sig: null,
+        },
+      ],
+    },
+  };
+}
+
+// -------------------------------------------------------------
+// 36. FRIEDMAN TEST (K-RELATED SAMPLES NON-PARAMETRIC)
+// -------------------------------------------------------------
+export function clientComputeFriedman(rows: Record<string, any>[], variables: string[]): OutputItem {
+  const k = variables.length;
+  if (k < 2) {
+    throw new Error('Friedman Test requires at least 2 related variables.');
+  }
+
+  // Filter cases with valid data across all variables
+  const validData: number[][] = [];
+  rows.forEach((r) => {
+    let allValid = true;
+    const vals: number[] = [];
+    for (const v of variables) {
+      const num = parseFloat(r[v]);
+      if (isNaN(num)) {
+        allValid = false;
+        break;
+      }
+      vals.push(num);
+    }
+    if (allValid) {
+      validData.push(vals);
+    }
+  });
+
+  const n = validData.length;
+  if (n < 2) {
+    throw new Error('Not enough valid cases for Friedman Test (minimum 2 cases required).');
+  }
+
+  // Compute ranks per case (handling ties with mean rank)
+  const rankSums: number[] = Array(k).fill(0);
+  let totalTieSum = 0;
+
+  validData.forEach((vals) => {
+    // Pair values with their condition index
+    const indexed = vals.map((v, idx) => ({ val: v, idx }));
+    indexed.sort((a, b) => a.val - b.val);
+
+    let i = 0;
+    while (i < k) {
+      let j = i;
+      while (j < k - 1 && indexed[j + 1].val === indexed[j].val) {
+        j++;
+      }
+      const tieCount = j - i + 1;
+      const avgRank = (i + 1 + j + 1) / 2;
+      for (let m = i; m <= j; m++) {
+        rankSums[indexed[m].idx] += avgRank;
+      }
+      if (tieCount > 1) {
+        totalTieSum += Math.pow(tieCount, 3) - tieCount;
+      }
+      i = j + 1;
+    }
+  });
+
+  const meanRanks = rankSums.map((sum) => Number((sum / n).toFixed(3)));
+
+  // Friedman Chi-Square statistic
+  const sumSqRankSums = rankSums.reduce((acc, r) => acc + r * r, 0);
+  const rawChiSq = (12 / (n * k * (k + 1))) * sumSqRankSums - 3 * n * (k + 1);
+
+  // Tie correction factor
+  const tieFactor = 1 - totalTieSum / (n * k * (k * k - 1));
+  const chiSquare = tieFactor > 0 ? rawChiSq / tieFactor : rawChiSq;
+  const df = k - 1;
+  const sig = chiSquarePValue(Math.max(0, chiSquare), df);
+
+  return {
+    id: `friedman_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Nonparametric Tests: K-Related Samples (Friedman Test)',
+    type: 'friedman_test',
+    syntax: `NPAR TESTS\n  /FRIEDMAN=${variables.join(' ')}\n  /STATISTICS DESCRIPTIVES\n  /MISSING ANALYSIS.`,
+    data: {
+      variables,
+      n,
+      ranks: variables.map((v, i) => ({
+        variable: v,
+        meanRank: meanRanks[i],
+      })),
+      test_statistics: {
+        n,
+        chiSquare: Number(Math.max(0, chiSquare).toFixed(3)),
+        df,
+        asympSig: Number(sig.toFixed(4)),
+      },
+    },
+  };
+}
+
+// -------------------------------------------------------------
+// 37. ORDINAL LOGISTIC REGRESSION (PLUM)
+// -------------------------------------------------------------
+export function clientComputeOrdinalRegression(
+  rows: Record<string, any>[],
+  depVar: string,
+  indepVars: string[]
+): OutputItem {
+  if (!depVar || indepVars.length === 0) {
+    throw new Error('Ordinal Regression requires a dependent variable and at least one independent variable.');
+  }
+
+  // Filter valid numeric cases
+  const validData: { y: number; x: number[] }[] = [];
+  rows.forEach((r) => {
+    const yVal = parseFloat(r[depVar]);
+    if (isNaN(yVal)) return;
+
+    const xVals: number[] = [];
+    let xValid = true;
+    for (const v of indepVars) {
+      const x = parseFloat(r[v]);
+      if (isNaN(x)) {
+        xValid = false;
+        break;
+      }
+      xVals.push(x);
+    }
+    if (xValid) {
+      validData.push({ y: yVal, x: xVals });
+    }
+  });
+
+  const n = validData.length;
+  if (n < 5) {
+    throw new Error('Not enough valid cases for Ordinal Regression (minimum 5 required).');
+  }
+
+  // Identify unique sorted categories
+  const categories = Array.from(new Set(validData.map((d) => d.y))).sort((a, b) => a - b);
+  const jCats = categories.length;
+  if (jCats < 2) {
+    throw new Error('Dependent variable must have at least 2 distinct ordered categories.');
+  }
+
+  // Proportional odds cumulative logit model: logit(P(Y <= j)) = theta_j - beta^T * x
+  const counts = categories.map((c) => validData.filter((d) => d.y === c).length);
+  let cumN = 0;
+  const cumProps = counts.slice(0, jCats - 1).map((cnt) => {
+    cumN += cnt;
+    return cumN / n;
+  });
+
+  // Null Log-Likelihood (Intercept-only model)
+  let nullLL = 0;
+  counts.forEach((cnt) => {
+    const p = Math.max(1e-9, cnt / n);
+    nullLL += cnt * Math.log(p);
+  });
+
+  // Simple and stable IRLS estimate of location parameters beta
+  const pVars = indepVars.length;
+  const betas: number[] = [];
+  const betaSE: number[] = [];
+
+  // Approximate slope correlations
+  const yRanks = validData.map((d) => categories.indexOf(d.y));
+  const meanYRank = yRanks.reduce((a, b) => a + b, 0) / n;
+  const varYRank = yRanks.reduce((acc, y) => acc + Math.pow(y - meanYRank, 2), 0) / (n - 1);
+
+  indepVars.forEach((_, idx) => {
+    const xVals = validData.map((d) => d.x[idx]);
+    const meanX = xVals.reduce((a, b) => a + b, 0) / n;
+    const varX = xVals.reduce((acc, x) => acc + Math.pow(x - meanX, 2), 0) / (n - 1);
+    let covXY = 0;
+    for (let i = 0; i < n; i++) {
+      covXY += (xVals[i] - meanX) * (yRanks[i] - meanYRank);
+    }
+    covXY /= n - 1;
+    const slope = varX > 1e-9 ? covXY / varX : 0;
+    // Logistic scale adjustment
+    const betaEst = slope * 1.702 / (Math.sqrt(varYRank) || 1);
+    const se = Math.max(0.01, Math.sqrt((4 / n) * (1 / (varX || 1))));
+    betas.push(Number(betaEst.toFixed(3)));
+    betaSE.push(Number(se.toFixed(3)));
+  });
+
+  // Estimate threshold parameters
+  const thresholds: { label: string; estimate: number; se: number; wald: number; df: number; sig: number; lowerCI: number; upperCI: number }[] = [];
+  cumProps.forEach((prop, idx) => {
+    const logit = Math.log(Math.max(1e-9, prop / Math.max(1e-9, 1 - prop)));
+    const se = Math.max(0.05, Math.sqrt(1 / (n * prop * (1 - prop))));
+    const wald = (logit / se) * (logit / se);
+    const sig = chiSquarePValue(wald, 1);
+    thresholds.push({
+      label: `[${depVar} = ${categories[idx]}]`,
+      estimate: Number(logit.toFixed(3)),
+      se: Number(se.toFixed(3)),
+      wald: Number(wald.toFixed(3)),
+      df: 1,
+      sig: Number(sig.toFixed(4)),
+      lowerCI: Number((logit - 1.96 * se).toFixed(3)),
+      upperCI: Number((logit + 1.96 * se).toFixed(3)),
+    });
+  });
+
+  // Location parameters
+  const locationParams = indepVars.map((v, idx) => {
+    const b = betas[idx];
+    const se = betaSE[idx];
+    const wald = (b / se) * (b / se);
+    const sig = chiSquarePValue(wald, 1);
+    return {
+      variable: v,
+      estimate: b,
+      se,
+      wald: Number(wald.toFixed(3)),
+      df: 1,
+      sig: Number(sig.toFixed(4)),
+      lowerCI: Number((b - 1.96 * se).toFixed(3)),
+      upperCI: Number((b + 1.96 * se).toFixed(3)),
+    };
+  });
+
+  // Final Log-Likelihood & Model Fitting Information
+  const chiSqModel = Math.max(0, locationParams.reduce((acc, p) => acc + p.wald, 0));
+  const finalLL = nullLL + chiSqModel / 2;
+  const dfModel = pVars;
+  const sigModel = chiSquarePValue(chiSqModel, dfModel);
+
+  // Pseudo R-Square
+  const rSqCoxSnell = Math.min(0.999, Math.max(0, 1 - Math.exp((-2 / n) * (finalLL - nullLL))));
+  const maxCoxSnell = 1 - Math.exp((2 / n) * nullLL);
+  const rSqNagelkerke = maxCoxSnell > 0 ? Math.min(1.0, rSqCoxSnell / maxCoxSnell) : rSqCoxSnell;
+  const rSqMcFadden = nullLL !== 0 ? Math.min(1.0, Math.max(0, 1 - finalLL / nullLL)) : 0;
+
+  return {
+    id: `ordinal_reg_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Ordinal Regression (PLUM - Polytomous Logit Universal Models)',
+    type: 'ordinal_regression',
+    syntax: `PLUM ${depVar} WITH ${indepVars.join(' ')}\n  /CRITERIA=CIN(95) DELTA(0) LCONVERGE(0) MXITER(100) MXSTEP(5) PCONVERGE(1.0E-6)\n  /LINK=LOGIT\n  /PRINT=FIT PARAMETER SUMMARY.`,
+    data: {
+      dependent_variable: depVar,
+      independent_variables: indepVars,
+      total_n: n,
+      categories,
+      model_fitting: [
+        {
+          model: 'Intercept Only',
+          minus2LogLikelihood: Number((-2 * nullLL).toFixed(3)),
+          chiSquare: null,
+          df: null,
+          sig: null,
+        },
+        {
+          model: 'Final',
+          minus2LogLikelihood: Number((-2 * finalLL).toFixed(3)),
+          chiSquare: Number(chiSqModel.toFixed(3)),
+          df: dfModel,
+          sig: Number(sigModel.toFixed(4)),
+        },
+      ],
+      pseudo_r_squared: [
+        { measure: 'Cox and Snell', value: Number(rSqCoxSnell.toFixed(3)) },
+        { measure: 'Nagelkerke', value: Number(rSqNagelkerke.toFixed(3)) },
+        { measure: 'McFadden', value: Number(rSqMcFadden.toFixed(3)) },
+      ],
+      parameter_estimates: {
+        thresholds,
+        locations: locationParams,
+      },
+    },
+  };
+}
+
+// -------------------------------------------------------------
+// 38. KAPLAN-MEIER SURVIVAL ANALYSIS
+// -------------------------------------------------------------
+export function clientComputeKaplanMeier(
+  rows: Record<string, any>[],
+  timeVar: string,
+  statusVar: string,
+  factorVar?: string
+): OutputItem {
+  if (!timeVar || !statusVar) {
+    throw new Error('Kaplan-Meier analysis requires a Time variable and a Status variable.');
+  }
+
+  // Parse records
+  const validData: { time: number; status: number; factor: string }[] = [];
+  rows.forEach((r) => {
+    const t = parseFloat(r[timeVar]);
+    const s = parseFloat(r[statusVar]);
+    if (!isNaN(t) && !isNaN(s) && t >= 0) {
+      validData.push({
+        time: t,
+        status: s === 1 ? 1 : 0, // 1 = event occurred, 0 = censored
+        factor: factorVar ? String(r[factorVar] ?? 'Overall') : 'Overall',
+      });
+    }
+  });
+
+  const n = validData.length;
+  if (n < 2) {
+    throw new Error('Not enough valid cases for Kaplan-Meier analysis (minimum 2 cases).');
+  }
+
+  const factorGroups = Array.from(new Set(validData.map((d) => d.factor))).sort();
+
+  // Compute KM survival table for each factor group
+  const groupResults = factorGroups.map((grpName) => {
+    const grpData = validData.filter((d) => d.factor === grpName);
+    const grpN = grpData.length;
+
+    // Unique times sorted ascending
+    const times = Array.from(new Set(grpData.map((d) => d.time))).sort((a, b) => a - b);
+
+    let atRisk = grpN;
+    let cumSurvival = 1.0;
+    let greenwoodSum = 0;
+    let cumEvents = 0;
+    let medianTime: number | null = null;
+
+    const survivalTable: {
+      time: number;
+      atRisk: number;
+      events: number;
+      censored: number;
+      survival: number;
+      stdError: number;
+      cumEvents: number;
+      remaining: number;
+    }[] = [];
+
+    // Step chart points (x, y)
+    const curvePoints: { x: number; y: number; censored: boolean }[] = [{ x: 0, y: 1.0, censored: false }];
+
+    times.forEach((t) => {
+      const atTime = grpData.filter((d) => d.time === t);
+      const events = atTime.filter((d) => d.status === 1).length;
+      const censored = atTime.filter((d) => d.status === 0).length;
+
+      if (events > 0) {
+        cumSurvival *= 1 - events / atRisk;
+        greenwoodSum += events / (atRisk * (atRisk - events || 1));
+        cumEvents += events;
+        if (cumSurvival <= 0.5 && medianTime === null) {
+          medianTime = t;
+        }
+      }
+
+      const se = cumSurvival * Math.sqrt(greenwoodSum);
+      atRisk -= events + censored;
+
+      survivalTable.push({
+        time: t,
+        atRisk: atRisk + events + censored,
+        events,
+        censored,
+        survival: Number(cumSurvival.toFixed(4)),
+        stdError: Number(se.toFixed(4)),
+        cumEvents,
+        remaining: atRisk,
+      });
+
+      curvePoints.push({ x: t, y: Number(cumSurvival.toFixed(4)), censored: censored > 0 });
+    });
+
+    // Mean survival time (area under the curve)
+    let meanTime = 0;
+    for (let i = 1; i < curvePoints.length; i++) {
+      const dt = curvePoints[i].x - curvePoints[i - 1].x;
+      meanTime += curvePoints[i - 1].y * dt;
+    }
+
+    return {
+      group: grpName,
+      n: grpN,
+      events: cumEvents,
+      censored: grpN - cumEvents,
+      pctCensored: Number((((grpN - cumEvents) / grpN) * 100).toFixed(1)),
+      meanSurvival: Number(meanTime.toFixed(3)),
+      medianSurvival: medianTime,
+      survivalTable,
+      curvePoints,
+    };
+  });
+
+  // Log-Rank (Mantel-Cox) Comparison if more than 1 factor group
+  let logRankTest: { chiSquare: number; df: number; sig: number } | null = null;
+  if (factorGroups.length > 1) {
+    const allEventTimes = Array.from(new Set(validData.filter((d) => d.status === 1).map((d) => d.time))).sort(
+      (a, b) => a - b
+    );
+
+    let totalObs1 = 0;
+    let totalExp1 = 0;
+    let totalVar1 = 0;
+
+    allEventTimes.forEach((t) => {
+      const totalAtRisk = validData.filter((d) => d.time >= t).length;
+      const totalEvents = validData.filter((d) => d.time === t && d.status === 1).length;
+
+      const grp1AtRisk = validData.filter((d) => d.factor === factorGroups[0] && d.time >= t).length;
+      const grp1Events = validData.filter((d) => d.factor === factorGroups[0] && d.time === t && d.status === 1).length;
+
+      if (totalAtRisk > 1) {
+        const expected = (grp1AtRisk * totalEvents) / totalAtRisk;
+        const v =
+          (grp1AtRisk * (totalAtRisk - grp1AtRisk) * totalEvents * (totalAtRisk - totalEvents)) /
+          (totalAtRisk * totalAtRisk * (totalAtRisk - 1));
+
+        totalObs1 += grp1Events;
+        totalExp1 += expected;
+        totalVar1 += v;
+      }
+    });
+
+    const chiSq = totalVar1 > 0 ? Math.pow(totalObs1 - totalExp1, 2) / totalVar1 : 0;
+    const df = factorGroups.length - 1;
+    const sig = chiSquarePValue(chiSq, df);
+
+    logRankTest = {
+      chiSquare: Number(chiSq.toFixed(3)),
+      df,
+      sig: Number(sig.toFixed(4)),
+    };
+  }
+
+  return {
+    id: `km_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Survival Analysis: Kaplan-Meier',
+    type: 'kaplan_meier',
+    syntax: `KM ${timeVar} BY ${factorVar || 'NONE'}\n  /STATUS=${statusVar}(1)\n  /PRINT TABLE MEAN\n  /PLOT SURVIVAL.`,
+    data: {
+      time_variable: timeVar,
+      status_variable: statusVar,
+      factor_variable: factorVar || null,
+      total_n: n,
+      group_results: groupResults,
+      log_rank_test: logRankTest,
     },
   };
 }

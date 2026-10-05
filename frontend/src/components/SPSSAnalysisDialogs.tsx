@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ArrowRight, ArrowLeft } from 'lucide-react';
 import { VariableMeta, AnalysisModalType, OutputItem } from '../types/spss';
 import { statsApiService } from '../services/api';
@@ -30,7 +30,21 @@ import {
   clientComputeKMeans,
   clientComputeHistogramWithCurve,
   clientComputeScatterWithRegression,
+  clientComputeBoxplot,
+  clientComputeQQPlot,
+  clientComputeCountValues,
+  clientComputeRankCases,
+  clientComputeVisualBinning,
+  clientComputeTranspose,
+  clientComputeRestructure,
+  clientComputeRepeatedMeasuresAnova,
+  clientComputeFriedman,
+  clientComputeOrdinalRegression,
+  clientComputeKaplanMeier,
 } from '../utils/clientStats';
+
+// Persist user variable selections and options per dialog modalType (standard IBM SPSS Desktop behavior)
+const spssDialogMemoryCache: Record<string, any> = {};
 
 interface SPSSAnalysisDialogsProps {
   modalType: AnalysisModalType;
@@ -44,6 +58,7 @@ interface SPSSAnalysisDialogsProps {
   onAnalysisComplete: (output: OutputItem) => void;
   onPasteSyntax: (syntax: string) => void;
   onApplyDataOperation?: (newRows: Record<string, any>[]) => void;
+  onReplaceEntireDataset?: (newVariables: VariableMeta[], newRows: Record<string, any>[]) => void;
 }
 
 export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
@@ -58,50 +73,167 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   onAnalysisComplete,
   onPasteSyntax,
   onApplyDataOperation,
+  onReplaceEntireDataset,
 }) => {
+  const initialMemory = (modalType && spssDialogMemoryCache[modalType]) || {};
+
   // State for variables selection
   const [selectedSourceVar, setSelectedSourceVar] = useState<string | null>(null);
-  const [targetVars, setTargetVars] = useState<string[]>([]);
-  const [numClusters, setNumClusters] = useState<number>(3);
-  const [saveClusterMembership, setSaveClusterMembership] = useState<boolean>(true);
-  const [numBins, setNumBins] = useState<number>(10);
+  const [targetVars, setTargetVars] = useState<string[]>(() => {
+    if (Array.isArray(initialMemory.targetVars)) {
+      return initialMemory.targetVars.filter((v: string) => variables.some((mv) => mv.name === v));
+    }
+    return [];
+  });
+  const [numClusters, setNumClusters] = useState<number>(initialMemory.numClusters ?? 3);
+  const [saveClusterMembership, setSaveClusterMembership] = useState<boolean>(initialMemory.saveClusterMembership ?? true);
+  const [numBins, setNumBins] = useState<number>(initialMemory.numBins ?? 10);
   const [selectedTargetVar, setSelectedTargetVar] = useState<string | null>(null);
 
   // Additional fields for specialized dialogs
-  const [rowVar, setRowVar] = useState<string>('');
-  const [colVar, setColVar] = useState<string>('');
-  const [depVar, setDepVar] = useState<string>('');
-  const [factorVar, setFactorVar] = useState<string>('');
-  const [factorVarB, setFactorVarB] = useState<string>('');
-  const [testValue, setTestValue] = useState<number>(0);
-  const [groupVar, setGroupVar] = useState<string>('');
-  const [group1Val, setGroup1Val] = useState<string>('m');
-  const [group2Val, setGroup2Val] = useState<string>('f');
+  const [rowVar, setRowVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.rowVar) ? initialMemory.rowVar : '';
+  });
+  const [colVar, setColVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.colVar) ? initialMemory.colVar : '';
+  });
+  const [depVar, setDepVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.depVar) ? initialMemory.depVar : '';
+  });
+  const [factorVar, setFactorVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.factorVar) ? initialMemory.factorVar : '';
+  });
+  const [factorVarB, setFactorVarB] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.factorVarB) ? initialMemory.factorVarB : '';
+  });
+  const [testValue, setTestValue] = useState<number>(initialMemory.testValue ?? 0);
+  const [groupVar, setGroupVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.groupVar) ? initialMemory.groupVar : '';
+  });
+  const [group1Val, setGroup1Val] = useState<string>(initialMemory.group1Val ?? 'm');
+  const [group2Val, setGroup2Val] = useState<string>(initialMemory.group2Val ?? 'f');
+
+  // Survival status variable
+  const [statusVar, setStatusVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.statusVar) ? initialMemory.statusVar : '';
+  });
 
   // Compute variable state
-  const [computeTargetVar, setComputeTargetVar] = useState<string>('');
-  const [computeExpression, setComputeExpression] = useState<string>('');
+  const [computeTargetVar, setComputeTargetVar] = useState<string>(initialMemory.computeTargetVar ?? '');
+  const [computeExpression, setComputeExpression] = useState<string>(initialMemory.computeExpression ?? '');
 
   // Chart builder state
-  const [chartType, setChartType] = useState<'bar' | 'pie' | 'histogram' | 'scatter' | 'line' | 'boxplot'>('bar');
-  const [chartXVar, setChartXVar] = useState<string>('');
-  const [chartYVar, setChartYVar] = useState<string>('');
-  const [chartTitle, setChartTitle] = useState<string>('');
+  const [chartType, setChartType] = useState<'bar' | 'pie' | 'histogram' | 'scatter' | 'line' | 'boxplot'>(
+    initialMemory.chartType ?? 'bar'
+  );
+  const [chartXVar, setChartXVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.chartXVar) ? initialMemory.chartXVar : '';
+  });
+  const [chartYVar, setChartYVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.chartYVar) ? initialMemory.chartYVar : '';
+  });
+  const [chartTitle, setChartTitle] = useState<string>(initialMemory.chartTitle ?? '');
 
   // Data management state
-  const [sortOrder, setSortOrder] = useState<'A' | 'D'>('A');
-  const [filterCondition, setFilterCondition] = useState<string>('salary > 30000');
+  const [sortOrder, setSortOrder] = useState<'A' | 'D'>(initialMemory.sortOrder ?? 'A');
+  const [filterCondition, setFilterCondition] = useState<string>(initialMemory.filterCondition ?? 'salary > 30000');
   const [splitVar, setSplitVar] = useState<string>(splitByVariable || '');
   const [splitMode, setSplitMode] = useState<'off' | 'layered'>(splitByVariable ? 'layered' : 'off');
   const [weightVar, setWeightVar] = useState<string>(weightByVariable || '');
   const [weightMode, setWeightMode] = useState<'off' | 'weighted'>(weightByVariable ? 'weighted' : 'off');
 
   // Advanced analysis options
-  const [controlVar, setControlVar] = useState<string>('');
-  const [indepVar, setIndepVar] = useState<string>('');
-  const [testProp, setTestProp] = useState<number>(0.5);
-  const [cutPointType, setCutPointType] = useState<'median' | 'mean' | 'custom'>('median');
-  const [customCut, setCustomCut] = useState<number>(0);
+  const [controlVar, setControlVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.controlVar) ? initialMemory.controlVar : '';
+  });
+  const [indepVar, setIndepVar] = useState<string>(() => {
+    return variables.some((mv) => mv.name === initialMemory.indepVar) ? initialMemory.indepVar : '';
+  });
+  const [testProp, setTestProp] = useState<number>(initialMemory.testProp ?? 0.5);
+  const [cutPointType, setCutPointType] = useState<'median' | 'mean' | 'custom'>(initialMemory.cutPointType ?? 'median');
+  const [customCut, setCustomCut] = useState<number>(initialMemory.customCut ?? 0);
+
+  // Sync memory cache on state changes
+  useEffect(() => {
+    if (!modalType) return;
+    spssDialogMemoryCache[modalType] = {
+      targetVars,
+      rowVar,
+      colVar,
+      depVar,
+      factorVar,
+      factorVarB,
+      groupVar,
+      group1Val,
+      group2Val,
+      testValue,
+      controlVar,
+      indepVar,
+      statusVar,
+      numClusters,
+      saveClusterMembership,
+      numBins,
+      chartType,
+      chartXVar,
+      chartYVar,
+      chartTitle,
+      sortOrder,
+      filterCondition,
+      computeTargetVar,
+      computeExpression,
+    };
+  }, [
+    modalType,
+    targetVars,
+    rowVar,
+    colVar,
+    depVar,
+    factorVar,
+    factorVarB,
+    groupVar,
+    group1Val,
+    group2Val,
+    testValue,
+    controlVar,
+    indepVar,
+    statusVar,
+    numClusters,
+    saveClusterMembership,
+    numBins,
+    chartType,
+    chartXVar,
+    chartYVar,
+    chartTitle,
+    sortOrder,
+    filterCondition,
+    computeTargetVar,
+    computeExpression,
+  ]);
+
+
+  // Count values state
+  const [countTargetVar, setCountTargetVar] = useState<string>('num_matches');
+  const [countTargetLabel, setCountTargetLabel] = useState<string>('Count of matches');
+  const [countConditionType, setCountConditionType] = useState<'exact' | 'range' | 'greater' | 'less'>('exact');
+  const [countVal1, setCountVal1] = useState<number>(1);
+  const [countVal2, setCountVal2] = useState<number>(10);
+
+  // Rank cases state
+  const [rankDirection, setRankDirection] = useState<'ascending' | 'descending'>('ascending');
+  const [rankTiesMethod, setRankTiesMethod] = useState<'mean' | 'low' | 'high'>('mean');
+
+  // Visual binning state
+  const [binningTargetVar, setBinningTargetVar] = useState<string>('salary_bin');
+  const [binningMethod, setBinningMethod] = useState<'equal_width' | 'equal_percentile'>('equal_width');
+  const [binningNumBins, setBinningNumBins] = useState<number>(3);
+
+  // Transpose state
+  const [transposeNameVar, setTransposeNameVar] = useState<string>('');
+
+  // Restructure state
+  const [restructureIdVar, setRestructureIdVar] = useState<string>('id');
+  const [restructureMeasureName, setRestructureMeasureName] = useState<string>('trans1');
+  const [restructureIndexName, setRestructureIndexName] = useState<string>('Index1');
 
   // Nested Sub-Dialog state
   const [activeSubDialog, setActiveSubDialog] = useState<
@@ -218,309 +350,433 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     }
   };
 
-  // Run Analysis
-  const handleRun = async () => {
+  // Core analysis runner for a given subset of rows
+  const executeCoreAnalysis = async (currentRows: Record<string, any>[]): Promise<OutputItem | null> => {
     let output: OutputItem | null = null;
 
-    try {
-      if (modalType === 'frequencies') {
-        const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
-        if (vars.length === 0) throw new Error('Please select at least one variable for Frequencies.');
-        output = await statsApiService.runFrequencies(rows, vars);
-        if (!output) output = clientComputeFrequencies(rows, vars, {}, weightByVariable);
-      } else if (modalType === 'descriptives') {
-        const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name);
-        if (vars.length === 0) throw new Error('Please select at least one numeric variable for Descriptives.');
-        output = await statsApiService.runDescriptives(rows, vars);
-        if (!output) output = clientComputeDescriptives(rows, vars, weightByVariable);
-      } else if (modalType === 'crosstabs') {
-        const r = rowVar || targetVars[0];
-        const c = colVar || targetVars[1];
-        if (!r || !c) throw new Error('Please select both a Row variable and a Column variable for Crosstabs.');
-        output = await statsApiService.runCrosstabs(rows, r, c);
-        if (!output) output = clientComputeCrosstabs(rows, r, c, weightByVariable);
-      } else if (modalType === 'correlations') {
-        const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
-        if (vars.length < 2) throw new Error('Please select at least two numeric variables for Bivariate Correlations.');
-        output = await statsApiService.runCorrelations(rows, vars);
-        if (!output) output = clientComputeCorrelations(rows, vars);
-      } else if (modalType === 'one_sample_t_test') {
-        const vars = targetVars.length > 0 ? targetVars : [];
-        if (vars.length === 0) throw new Error('Please select at least one Test Variable for One-Sample T-Test.');
-        output = await statsApiService.runOneSampleTTest(rows, vars, testValue);
-        if (!output) output = clientComputeOneSampleTTest(rows, vars, testValue);
-      } else if (modalType === 'independent_t_test') {
-        const vars = targetVars.length > 0 ? targetVars : [];
-        const g = groupVar;
-        if (vars.length === 0 || !g) throw new Error('Please select Test Variable(s) and a Grouping Variable for Independent Samples T-Test.');
-        output = await statsApiService.runIndependentTTest(rows, vars, g, group1Val, group2Val);
-        if (!output) output = clientComputeIndependentTTest(rows, vars, g, group1Val, group2Val);
-      } else if (modalType === 'paired_t_test') {
-        const v1 = targetVars[0];
-        const v2 = targetVars[1];
-        if (!v1 || !v2) throw new Error('Please select two variables for Paired-Samples T-Test.');
-        output = await statsApiService.runPairedTTest(rows, [[v1, v2]]);
-        if (!output) output = clientComputePairedTTest(rows, [[v1, v2]]);
-      } else if (modalType === 'one_way_anova') {
-        const d = depVar || targetVars[0];
-        const f = factorVar;
-        if (!d || !f) throw new Error('Please select a Dependent Variable and a Factor Variable for One-Way ANOVA.');
-        output = await statsApiService.runOneWayAnova(rows, d, f);
-        if (!output) output = clientComputeAnova(rows, d, f);
-      } else if (modalType === 'two_way_anova') {
-        const d = depVar || targetVars[0];
-        const fA = factorVar;
-        const fB = factorVarB;
-        if (!d || !fA || !fB) throw new Error('Please select Dependent Variable and both Factor Variables for Two-Way ANOVA.');
-        output = clientComputeTwoWayAnova(rows, d, fA, fB);
-      } else if (modalType === 'linear_regression') {
-        const d = depVar;
-        const ivs = targetVars.length > 0 ? targetVars : [];
-        if (!d || ivs.length === 0) throw new Error('Please select a Dependent Variable and at least one Independent Variable for Linear Regression.');
-        output = await statsApiService.runLinearRegression(rows, d, ivs);
-        if (!output) output = clientComputeLinearRegression(rows, d, ivs);
-      } else if (modalType === 'reliability') {
-        const items = targetVars.length >= 2 ? targetVars : [];
-        if (items.length < 2) throw new Error('Please select at least two items for Reliability Analysis (Cronbach Alpha).');
-        output = await statsApiService.runReliability(rows, items);
-        if (!output) output = clientComputeReliability(rows, items);
-      } else if (modalType === 'mann_whitney') {
-        const testV = depVar || targetVars[0];
-        const grpV = groupVar;
-        if (!testV || !grpV) throw new Error('Please select a Test Variable and a Grouping Variable for Mann-Whitney U Test.');
-        output = await statsApiService.runNonparametric(rows, 'mann_whitney', { test_variable: testV, group_variable: grpV });
-        if (!output) output = clientComputeMannWhitney(rows, testV, grpV);
-      } else if (modalType === 'wilcoxon') {
-        const v1 = targetVars[0];
-        const v2 = targetVars[1];
-        if (!v1 || !v2) throw new Error('Please select two paired variables for Wilcoxon Signed-Ranks Test.');
-        output = await statsApiService.runNonparametric(rows, 'wilcoxon', { var1: v1, var2: v2 });
-        if (!output) output = clientComputeWilcoxon(rows, v1, v2);
-      } else if (modalType === 'kruskal_wallis') {
-        const testV = depVar || targetVars[0];
-        const grpV = factorVar;
-        if (!testV || !grpV) throw new Error('Please select a Test Variable and a Grouping Variable for Kruskal-Wallis Test.');
-        output = await statsApiService.runNonparametric(rows, 'kruskal_wallis', { test_variable: testV, group_variable: grpV });
-        if (!output) output = clientComputeKruskalWallis(rows, testV, grpV);
-      } else if (modalType === 'explore') {
-        const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 2);
-        if (vars.length === 0) throw new Error('Please select at least one numeric variable for Explore.');
-        output = clientComputeExplore(rows, vars);
-      } else if (modalType === 'factor_analysis') {
-        const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 4);
-        if (vars.length < 2) throw new Error('Please select at least two numeric variables for Factor Analysis.');
-        output = clientComputeFactorAnalysis(rows, vars);
-      } else if (modalType === 'logistic_regression') {
-        const d = depVar || targetVars[0];
-        const ivs = targetVars.filter((v) => v !== d);
-        if (!d || ivs.length === 0) throw new Error('Please select a Binary Dependent Variable and Covariates for Logistic Regression.');
-        output = clientComputeLogisticRegression(rows, d, ivs);
-      } else if (modalType === 'compute_variable') {
-        if (!computeTargetVar.trim() || !computeExpression.trim()) {
-          throw new Error('Please enter both a Target Variable name and a Numeric Expression.');
-        }
-        const cleanTarget = computeTargetVar.trim().replace(/\s+/g, '_');
-        const expr = computeExpression.trim();
+    if (modalType === 'frequencies') {
+      const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
+      if (vars.length === 0) throw new Error('Please select at least one variable for Frequencies.');
+      output = await statsApiService.runFrequencies(currentRows, vars);
+      if (!output) output = clientComputeFrequencies(currentRows, vars, {}, weightByVariable);
+    } else if (modalType === 'descriptives') {
+      const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name);
+      if (vars.length === 0) throw new Error('Please select at least one numeric variable for Descriptives.');
+      output = await statsApiService.runDescriptives(currentRows, vars);
+      if (!output) output = clientComputeDescriptives(currentRows, vars, weightByVariable);
+    } else if (modalType === 'crosstabs') {
+      const r = rowVar || targetVars[0];
+      const c = colVar || targetVars[1];
+      if (!r || !c) throw new Error('Please select both a Row variable and a Column variable for Crosstabs.');
+      output = await statsApiService.runCrosstabs(currentRows, r, c);
+      if (!output) output = clientComputeCrosstabs(currentRows, r, c, weightByVariable);
+    } else if (modalType === 'correlations') {
+      const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
+      if (vars.length < 2) throw new Error('Please select at least two numeric variables for Bivariate Correlations.');
+      output = await statsApiService.runCorrelations(currentRows, vars);
+      if (!output) output = clientComputeCorrelations(currentRows, vars);
+    } else if (modalType === 'one_sample_t_test') {
+      const vars = targetVars.length > 0 ? targetVars : [];
+      if (vars.length === 0) throw new Error('Please select at least one Test Variable for One-Sample T-Test.');
+      output = await statsApiService.runOneSampleTTest(currentRows, vars, testValue);
+      if (!output) output = clientComputeOneSampleTTest(currentRows, vars, testValue, weightByVariable);
+    } else if (modalType === 'independent_t_test') {
+      const vars = targetVars.length > 0 ? targetVars : [];
+      const g = groupVar;
+      if (vars.length === 0 || !g) throw new Error('Please select Test Variable(s) and a Grouping Variable for Independent Samples T-Test.');
+      output = await statsApiService.runIndependentTTest(currentRows, vars, g, group1Val, group2Val);
+      if (!output) output = clientComputeIndependentTTest(currentRows, vars, g, group1Val, group2Val, weightByVariable);
+    } else if (modalType === 'paired_t_test') {
+      const v1 = targetVars[0];
+      const v2 = targetVars[1];
+      if (!v1 || !v2) throw new Error('Please select two variables for Paired-Samples T-Test.');
+      output = await statsApiService.runPairedTTest(currentRows, [[v1, v2]]);
+      if (!output) output = clientComputePairedTTest(currentRows, [[v1, v2]]);
+    } else if (modalType === 'one_way_anova') {
+      const d = depVar || targetVars[0];
+      const f = factorVar;
+      if (!d || !f) throw new Error('Please select a Dependent Variable and a Factor Variable for One-Way ANOVA.');
+      output = await statsApiService.runOneWayAnova(currentRows, d, f);
+      if (!output) output = clientComputeAnova(currentRows, d, f, weightByVariable);
+    } else if (modalType === 'two_way_anova') {
+      const d = depVar || targetVars[0];
+      const fA = factorVar;
+      const fB = factorVarB;
+      if (!d || !fA || !fB) throw new Error('Please select Dependent Variable and both Factor Variables for Two-Way ANOVA.');
+      output = clientComputeTwoWayAnova(currentRows, d, fA, fB);
+    } else if (modalType === 'linear_regression') {
+      const d = depVar;
+      const ivs = targetVars.length > 0 ? targetVars : [];
+      if (!d || ivs.length === 0) throw new Error('Please select a Dependent Variable and at least one Independent Variable for Linear Regression.');
+      output = await statsApiService.runLinearRegression(currentRows, d, ivs);
+      if (!output) output = clientComputeLinearRegression(currentRows, d, ivs);
+    } else if (modalType === 'reliability') {
+      const items = targetVars.length >= 2 ? targetVars : [];
+      if (items.length < 2) throw new Error('Please select at least two items for Reliability Analysis (Cronbach Alpha).');
+      output = await statsApiService.runReliability(currentRows, items);
+      if (!output) output = clientComputeReliability(currentRows, items);
+    } else if (modalType === 'mann_whitney') {
+      const testV = depVar || targetVars[0];
+      const grpV = groupVar;
+      if (!testV || !grpV) throw new Error('Please select a Test Variable and a Grouping Variable for Mann-Whitney U Test.');
+      output = await statsApiService.runNonparametric(currentRows, 'mann_whitney', { test_variable: testV, group_variable: grpV });
+      if (!output) output = clientComputeMannWhitney(currentRows, testV, grpV);
+    } else if (modalType === 'wilcoxon') {
+      const v1 = targetVars[0];
+      const v2 = targetVars[1];
+      if (!v1 || !v2) throw new Error('Please select two paired variables for Wilcoxon Signed-Ranks Test.');
+      output = await statsApiService.runNonparametric(currentRows, 'wilcoxon', { var1: v1, var2: v2 });
+      if (!output) output = clientComputeWilcoxon(currentRows, v1, v2);
+    } else if (modalType === 'kruskal_wallis') {
+      const testV = depVar || targetVars[0];
+      const grpV = factorVar;
+      if (!testV || !grpV) throw new Error('Please select a Test Variable and a Grouping Variable for Kruskal-Wallis Test.');
+      output = await statsApiService.runNonparametric(currentRows, 'kruskal_wallis', { test_variable: testV, group_variable: grpV });
+      if (!output) output = clientComputeKruskalWallis(currentRows, testV, grpV);
+    } else if (modalType === 'explore') {
+      const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 2);
+      if (vars.length === 0) throw new Error('Please select at least one numeric variable for Explore.');
+      output = clientComputeExplore(currentRows, vars);
+    } else if (modalType === 'factor_analysis') {
+      const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 4);
+      if (vars.length < 2) throw new Error('Please select at least two numeric variables for Factor Analysis.');
+      output = clientComputeFactorAnalysis(currentRows, vars);
+    } else if (modalType === 'logistic_regression') {
+      const d = depVar || targetVars[0];
+      const ivs = targetVars.filter((v) => v !== d);
+      if (!d || ivs.length === 0) throw new Error('Please select a Binary Dependent Variable and Covariates for Logistic Regression.');
+      output = clientComputeLogisticRegression(currentRows, d, ivs);
+    } else if (modalType === 'compute_variable') {
+      if (!computeTargetVar.trim() || !computeExpression.trim()) {
+        throw new Error('Please enter both a Target Variable name and a Numeric Expression.');
+      }
+      const cleanTarget = computeTargetVar.trim().replace(/\s+/g, '_');
+      const expr = computeExpression.trim();
 
-        const updatedRows = rows.map((r) => {
-          const rowCopy = { ...r };
-          try {
-            let jsExpr = expr
-              .replace(/\bLN\s*\(/gi, 'Math.log(')
-              .replace(/\bLOG10\s*\(/gi, 'Math.log10(')
-              .replace(/\bEXP\s*\(/gi, 'Math.exp(')
-              .replace(/\bSQRT\s*\(/gi, 'Math.sqrt(')
-              .replace(/\bABS\s*\(/gi, 'Math.abs(')
-              .replace(/\bROUND\s*\(/gi, 'Math.round(');
+      const updatedRows = currentRows.map((r) => {
+        const rowCopy = { ...r };
+        try {
+          let jsExpr = expr
+            .replace(/\bLN\s*\(/gi, 'Math.log(')
+            .replace(/\bLOG10\s*\(/gi, 'Math.log10(')
+            .replace(/\bEXP\s*\(/gi, 'Math.exp(')
+            .replace(/\bSQRT\s*\(/gi, 'Math.sqrt(')
+            .replace(/\bABS\s*\(/gi, 'Math.abs(')
+            .replace(/\bROUND\s*\(/gi, 'Math.round(');
 
-            variables.forEach((v) => {
-              const reg = new RegExp(`\\b${v.name}\\b`, 'g');
-              const val = r[v.name];
-              const safeNum = val !== undefined && val !== null && !isNaN(Number(val)) ? Number(val) : 0;
-              jsExpr = jsExpr.replace(reg, String(safeNum));
-            });
-
-            const res = Function(`"use strict"; return (${jsExpr})`)();
-            rowCopy[cleanTarget] = typeof res === 'number' && !isNaN(res) && isFinite(res) ? Number(res.toFixed(4)) : res;
-          } catch {
-            rowCopy[cleanTarget] = null;
-          }
-          return rowCopy;
-        });
-
-        if (onApplyDataOperation) {
-          onApplyDataOperation(updatedRows);
-        }
-
-        output = {
-          id: `compute_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
-          title: 'Compute Variable',
-          type: 'data_management',
-          syntax: `COMPUTE ${cleanTarget} = ${expr}.\nEXECUTE.`,
-          data: {
-            'Operation': 'COMPUTE VARIABLE',
-            'Target Variable': cleanTarget,
-            'Numeric Expression': expr,
-            'Cases Computed': rows.length,
-            'Status': 'New variable computed and stored in active dataset',
-          },
-        };
-      } else if (modalType === 'sort_cases') {
-        const sortField = selectedSourceVar || targetVars[0] || variables[0]?.name;
-        if (sortField) {
-          const sorted = [...rows].sort((a, b) => {
-            const valA = a[sortField];
-            const valB = b[sortField];
-            if (typeof valA === 'number' && typeof valB === 'number') {
-              return sortOrder === 'A' ? valA - valB : valB - valA;
-            }
-            return sortOrder === 'A'
-              ? String(valA || '').localeCompare(String(valB || ''))
-              : String(valB || '').localeCompare(String(valA || ''));
+          variables.forEach((v) => {
+            const reg = new RegExp(`\\b${v.name}\\b`, 'g');
+            const val = r[v.name];
+            const safeNum = val !== undefined && val !== null && !isNaN(Number(val)) ? Number(val) : 0;
+            jsExpr = jsExpr.replace(reg, String(safeNum));
           });
-          if (onApplyDataOperation) onApplyDataOperation(sorted);
-          output = {
-            id: `dm_${Date.now()}`,
-            timestamp: new Date().toLocaleTimeString(),
-            title: 'Sort Cases',
-            type: 'data_management',
-            syntax: `SORT CASES BY ${sortField} (${sortOrder === 'A' ? 'A' : 'D'}).`,
-            data: {
-              'Operation': 'SORT CASES',
-              'Key Variable': sortField,
-              'Sort Order': sortOrder === 'A' ? 'Ascending' : 'Descending',
-              'Cases Processed': rows.length,
-            },
-          };
+
+          const res = Function(`"use strict"; return (${jsExpr})`)();
+          rowCopy[cleanTarget] = typeof res === 'number' && !isNaN(res) && isFinite(res) ? Number(res.toFixed(4)) : res;
+        } catch {
+          rowCopy[cleanTarget] = null;
         }
-      } else if (modalType === 'select_cases') {
+        return rowCopy;
+      });
+
+      if (onApplyDataOperation) {
+        onApplyDataOperation(updatedRows);
+      }
+
+      output = {
+        id: `compute_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        title: 'Compute Variable',
+        type: 'data_management',
+        syntax: `COMPUTE ${cleanTarget} = ${expr}.\nEXECUTE.`,
+        data: {
+          'Operation': 'COMPUTE VARIABLE',
+          'Target Variable': cleanTarget,
+          'Numeric Expression': expr,
+          'Cases Computed': currentRows.length,
+          'Status': 'New variable computed and stored in active dataset',
+        },
+      };
+    } else if (modalType === 'sort_cases') {
+      const sortField = selectedSourceVar || targetVars[0] || variables[0]?.name;
+      if (sortField) {
+        const sorted = [...currentRows].sort((a, b) => {
+          const valA = a[sortField];
+          const valB = b[sortField];
+          if (typeof valA === 'number' && typeof valB === 'number') {
+            return sortOrder === 'A' ? valA - valB : valB - valA;
+          }
+          return sortOrder === 'A'
+            ? String(valA || '').localeCompare(String(valB || ''))
+            : String(valB || '').localeCompare(String(valA || ''));
+        });
+        if (onApplyDataOperation) onApplyDataOperation(sorted);
         output = {
           id: `dm_${Date.now()}`,
           timestamp: new Date().toLocaleTimeString(),
-          title: 'Select Cases (Filter)',
+          title: 'Sort Cases',
           type: 'data_management',
-          syntax: `USE ALL.\nCOMPUTE filter_$ = (${filterCondition}).\nFILTER BY filter_$.\nEXECUTE.`,
+          syntax: `SORT CASES BY ${sortField} (${sortOrder === 'A' ? 'A' : 'D'}).`,
           data: {
-            'Operation': 'SELECT CASES / FILTER',
-            'Filter Condition': filterCondition,
-            'Status': 'Filter active across active dataset',
-            'Cases': rows.length,
-          },
-        };
-      } else if (modalType === 'split_file') {
-        const sVar = splitMode === 'off' ? null : (splitVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
-        if (onSetSplitByVariable) {
-          onSetSplitByVariable(sVar);
-        }
-        output = {
-          id: `dm_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
-          title: 'Split File',
-          type: 'data_management',
-          syntax: sVar ? `SORT CASES BY ${sVar}.\nSPLIT FILE LAYERED BY ${sVar}.` : 'SPLIT FILE OFF.',
-          data: {
-            'Operation': 'SPLIT FILE',
-            'Layer Variable': sVar || 'None (Split File Off)',
-            'Status': sVar ? `Active Split by ${sVar}` : 'Split File disabled (All cases analyzed together)',
-          },
-        };
-      } else if (modalType === 'weight_cases') {
-        const wVar = weightMode === 'off' ? null : (weightVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
-        if (onSetWeightByVariable) {
-          onSetWeightByVariable(wVar);
-        }
-        output = {
-          id: `dm_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
-          title: 'Weight Cases',
-          type: 'data_management',
-          syntax: wVar ? `WEIGHT BY ${wVar}.` : 'WEIGHT OFF.',
-          data: {
-            'Operation': 'WEIGHT CASES',
-            'Frequency Variable': wVar || 'None (Weight Cases Off)',
-            'Status': wVar ? `Active case weights by ${wVar}` : 'Weighting disabled',
-          },
-        };
-      } else if (modalType === 'means_report') {
-        const deps = targetVars.length > 0 ? targetVars : [variables[0]?.name];
-        const f = factorVar || variables[1]?.name;
-        if (!f) throw new Error('Please select a Factor (Grouping) Variable for Means Report.');
-        output = clientComputeMeansReport(rows, deps, f, weightByVariable);
-      } else if (modalType === 'partial_correlation') {
-        const vars = targetVars.length >= 2 ? targetVars : [variables[0]?.name, variables[1]?.name];
-        const c = controlVar || variables[2]?.name;
-        if (!c) throw new Error('Please select at least one Control Variable.');
-        output = clientComputePartialCorrelation(rows, vars, [c]);
-      } else if (modalType === 'curve_estimation') {
-        const d = depVar || targetVars[0] || variables[0]?.name;
-        const iv = indepVar || targetVars[1] || variables[1]?.name;
-        if (!d || !iv) throw new Error('Please select both Dependent and Independent variables.');
-        output = clientComputeCurveEstimation(rows, d, iv);
-      } else if (modalType === 'chi_square_goodness') {
-        const v = depVar || targetVars[0] || variables[0]?.name;
-        if (!v) throw new Error('Please select a Test Variable.');
-        output = clientComputeChiSquareGoodness(rows, v);
-      } else if (modalType === 'binomial_test') {
-        const v = depVar || targetVars[0] || variables[0]?.name;
-        if (!v) throw new Error('Please select a Test Variable.');
-        output = clientComputeBinomialTest(rows, v, testProp);
-      } else if (modalType === 'runs_test') {
-        const v = depVar || targetVars[0] || variables[0]?.name;
-        if (!v) throw new Error('Please select a Test Variable.');
-        output = clientComputeRunsTest(rows, v, cutPointType, customCut);
-      } else if (modalType === 'ancova') {
-        const d = depVar || targetVars[0] || variables[0]?.name;
-        const f = factorVar || variables[1]?.name;
-        const covs = controlVar ? [controlVar] : targetVars.slice(1).length > 0 ? targetVars.slice(1) : [variables[2]?.name || variables[0]?.name];
-        if (!d || !f) throw new Error('Please select both a Dependent variable and a Factor variable.');
-        output = clientComputeANCOVA(rows, d, f, covs);
-      } else if (modalType === 'kmeans_cluster') {
-        const vars = targetVars.length >= 1 ? targetVars : [variables[0]?.name, variables[1]?.name];
-        const res = clientComputeKMeans(rows, vars, numClusters || 3);
-        if (saveClusterMembership && res.clusterAssignments && onApplyDataOperation) {
-          const updatedRows = rows.map((r, idx) => ({
-            ...r,
-            QCL_1: res.clusterAssignments![idx] ?? null,
-          }));
-          onApplyDataOperation(updatedRows);
-        }
-        output = res;
-      } else if (modalType === 'histogram_curve') {
-        const v = depVar || targetVars[0] || variables[0]?.name;
-        if (!v) throw new Error('Please select a Variable for Histogram.');
-        output = clientComputeHistogramWithCurve(rows, v, numBins || 10);
-      } else if (modalType === 'scatter_regression') {
-        const x = chartXVar || targetVars[0] || variables[0]?.name;
-        const y = chartYVar || targetVars[1] || variables[1]?.name;
-        if (!x || !y) throw new Error('Please select both X and Y variables for Scatter Plot.');
-        output = clientComputeScatterWithRegression(rows, x, y);
-      } else if (modalType === 'chart_builder') {
-        const x = chartXVar || targetVars[0] || variables[0]?.name;
-        const y = chartYVar || targetVars[1];
-        output = {
-          id: `chart_${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
-          title: chartTitle || `${chartType.toUpperCase()} Chart of ${x}`,
-          type: 'chart',
-          syntax: `GRAPH /${chartType.toUpperCase()}=${x} ${y ? `BY ${y}` : ''}.`,
-          data: {
-            chartType,
-            xVar: x,
-            yVar: y,
-            title: chartTitle || `${chartType.toUpperCase()} Chart of ${x}`,
-            rows,
+            'Operation': 'SORT CASES',
+            'Sort Variable': sortField,
+            'Order': sortOrder === 'A' ? 'Ascending' : 'Descending',
+            'Cases Sorted': currentRows.length,
           },
         };
       }
-    } catch (err: any) {
-      alert(`Error computing analysis: ${err.message}`);
-      return;
+    } else if (modalType === 'select_cases') {
+      output = {
+        id: `dm_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        title: 'Select Cases (Filter)',
+        type: 'data_management',
+        syntax: `USE ALL.\nCOMPUTE filter_$ = (${filterCondition}).\nFILTER BY filter_$.\nEXECUTE.`,
+        data: {
+          'Operation': 'SELECT CASES / FILTER',
+          'Filter Condition': filterCondition,
+          'Status': 'Filter active across active dataset',
+          'Cases': currentRows.length,
+        },
+      };
+    } else if (modalType === 'split_file') {
+      const sVar = splitMode === 'off' ? null : (splitVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
+      if (onSetSplitByVariable) {
+        onSetSplitByVariable(sVar);
+      }
+      output = {
+        id: `dm_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        title: 'Split File',
+        type: 'data_management',
+        syntax: sVar ? `SORT CASES BY ${sVar}.\nSPLIT FILE LAYERED BY ${sVar}.` : 'SPLIT FILE OFF.',
+        data: {
+          'Operation': 'SPLIT FILE',
+          'Layer Variable': sVar || 'None (Split File Off)',
+          'Status': sVar ? `Active Split by ${sVar}` : 'Split File disabled (All cases analyzed together)',
+        },
+      };
+    } else if (modalType === 'weight_cases') {
+      const wVar = weightMode === 'off' ? null : (weightVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
+      if (onSetWeightByVariable) {
+        onSetWeightByVariable(wVar);
+      }
+      output = {
+        id: `dm_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        title: 'Weight Cases',
+        type: 'data_management',
+        syntax: wVar ? `WEIGHT BY ${wVar}.` : 'WEIGHT OFF.',
+        data: {
+          'Operation': 'WEIGHT CASES',
+          'Frequency Variable': wVar || 'None (Weight Cases Off)',
+          'Status': wVar ? `Active case weights by ${wVar}` : 'Weighting disabled',
+        },
+      };
+    } else if (modalType === 'means_report') {
+      const deps = targetVars.length > 0 ? targetVars : [variables[0]?.name];
+      const f = factorVar || variables[1]?.name;
+      if (!f) throw new Error('Please select a Factor (Grouping) Variable for Means Report.');
+      output = clientComputeMeansReport(currentRows, deps, f, weightByVariable);
+    } else if (modalType === 'partial_correlation') {
+      const vars = targetVars.length >= 2 ? targetVars : [variables[0]?.name, variables[1]?.name];
+      const c = controlVar || variables[2]?.name;
+      if (!c) throw new Error('Please select at least one Control Variable.');
+      output = clientComputePartialCorrelation(currentRows, vars, [c]);
+    } else if (modalType === 'curve_estimation') {
+      const d = depVar || targetVars[0] || variables[0]?.name;
+      const iv = indepVar || targetVars[1] || variables[1]?.name;
+      if (!d || !iv) throw new Error('Please select both Dependent and Independent variables.');
+      output = clientComputeCurveEstimation(currentRows, d, iv);
+    } else if (modalType === 'chi_square_goodness') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Test Variable.');
+      output = clientComputeChiSquareGoodness(currentRows, v);
+    } else if (modalType === 'binomial_test') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Test Variable.');
+      output = clientComputeBinomialTest(currentRows, v, testProp);
+    } else if (modalType === 'runs_test') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Test Variable.');
+      output = clientComputeRunsTest(currentRows, v, cutPointType, customCut);
+    } else if (modalType === 'ancova') {
+      const d = depVar || targetVars[0] || variables[0]?.name;
+      const f = factorVar || variables[1]?.name;
+      const covs = controlVar ? [controlVar] : targetVars.slice(1).length > 0 ? targetVars.slice(1) : [variables[2]?.name || variables[0]?.name];
+      if (!d || !f) throw new Error('Please select both a Dependent variable and a Factor variable.');
+      output = clientComputeANCOVA(currentRows, d, f, covs);
+    } else if (modalType === 'kmeans_cluster') {
+      const vars = targetVars.length >= 1 ? targetVars : [variables[0]?.name, variables[1]?.name];
+      const res = clientComputeKMeans(currentRows, vars, numClusters || 3);
+      if (saveClusterMembership && res.clusterAssignments && onApplyDataOperation) {
+        const updatedRows = currentRows.map((r, idx) => ({
+          ...r,
+          QCL_1: res.clusterAssignments![idx] ?? null,
+        }));
+        onApplyDataOperation(updatedRows);
+      }
+      output = res;
+    } else if (modalType === 'histogram_curve') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Variable for Histogram.');
+      output = clientComputeHistogramWithCurve(currentRows, v, numBins || 10);
+    } else if (modalType === 'scatter_regression') {
+      const x = chartXVar || targetVars[0] || variables[0]?.name;
+      const y = chartYVar || targetVars[1] || variables[1]?.name;
+      if (!x || !y) throw new Error('Please select both X and Y variables for Scatter Plot.');
+      output = clientComputeScatterWithRegression(currentRows, x, y);
+    } else if (modalType === 'boxplot_chart') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Variable for Boxplot.');
+      output = clientComputeBoxplot(currentRows, v, factorVar || undefined);
+    } else if (modalType === 'qqplot_chart') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Variable for Normal Q-Q Plot.');
+      output = clientComputeQQPlot(currentRows, v);
+    } else if (modalType === 'count_values') {
+      if (!countTargetVar.trim()) throw new Error('Please enter a Target Variable name.');
+      const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
+      if (vars.length === 0) throw new Error('Please select at least one Variable to count.');
+      const res = clientComputeCountValues(currentRows, countTargetVar.trim(), countTargetLabel, vars, countConditionType, countVal1, countVal2);
+      if (onApplyDataOperation) {
+        onApplyDataOperation(res.updatedRows);
+      }
+      output = res.output;
+    } else if (modalType === 'rank_cases') {
+      const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
+      if (vars.length === 0) throw new Error('Please select at least one Variable to rank.');
+      const res = clientComputeRankCases(currentRows, vars, rankDirection, rankTiesMethod);
+      if (onApplyDataOperation) {
+        onApplyDataOperation(res.updatedRows);
+      }
+      output = res.output;
+    } else if (modalType === 'visual_binning') {
+      const v = depVar || targetVars[0] || variables[0]?.name;
+      if (!v) throw new Error('Please select a Variable to bin.');
+      if (!binningTargetVar.trim()) throw new Error('Please provide a Target Variable name.');
+      const res = clientComputeVisualBinning(currentRows, v, binningTargetVar.trim(), binningNumBins, binningMethod);
+      if (onApplyDataOperation) {
+        onApplyDataOperation(res.updatedRows);
+      }
+      output = res.output;
+    } else if (modalType === 'transpose_data') {
+      const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.name !== 'id').map((v) => v.name);
+      if (vars.length === 0) throw new Error('Please select at least one Variable to transpose.');
+      const res = clientComputeTranspose(currentRows, variables, vars, transposeNameVar || undefined);
+      if (onReplaceEntireDataset) {
+        onReplaceEntireDataset(res.transposedVariables, res.transposedRows);
+      } else if (onApplyDataOperation) {
+        onApplyDataOperation(res.transposedRows);
+      }
+      output = res.output;
+    } else if (modalType === 'restructure_data') {
+      if (targetVars.length < 2) throw new Error('Please select at least 2 repeated measure variables to restructure.');
+      const res = clientComputeRestructure(currentRows, variables, restructureIdVar, targetVars, restructureMeasureName, restructureIndexName);
+      if (onReplaceEntireDataset) {
+        onReplaceEntireDataset(res.restructuredVariables, res.restructuredRows);
+      } else if (onApplyDataOperation) {
+        onApplyDataOperation(res.restructuredRows);
+      }
+      output = res.output;
+    } else if (modalType === 'repeated_measures_anova') {
+      const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
+      if (vars.length < 2) throw new Error('Please select at least two Repeated Measures variables.');
+      output = clientComputeRepeatedMeasuresAnova(currentRows, vars, factorVar || undefined);
+    } else if (modalType === 'friedman_test') {
+      const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
+      if (vars.length < 2) throw new Error('Please select at least two Test variables for Friedman test.');
+      output = clientComputeFriedman(currentRows, vars);
+    } else if (modalType === 'ordinal_regression') {
+      const d = depVar || targetVars[0] || variables[0]?.name;
+      const ivs = targetVars.filter((v) => v !== d);
+      if (!d || ivs.length === 0) throw new Error('Please select a Dependent Variable and at least one Independent Variable for Ordinal Regression.');
+      output = clientComputeOrdinalRegression(currentRows, d, ivs);
+    } else if (modalType === 'kaplan_meier') {
+      const t = depVar || targetVars[0] || variables[0]?.name;
+      const s = statusVar || (targetVars.length > 1 ? targetVars[1] : undefined);
+      if (!t || !s) throw new Error('Please select both a Time variable and a Status variable for Kaplan-Meier analysis.');
+      output = clientComputeKaplanMeier(currentRows, t, s, factorVar || undefined);
+    } else if (modalType === 'chart_builder') {
+      const x = chartXVar || targetVars[0] || variables[0]?.name;
+      const y = chartYVar || targetVars[1];
+      output = {
+        id: `chart_${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString(),
+        title: chartTitle || `${chartType.toUpperCase()} Chart of ${x}`,
+        type: 'chart',
+        syntax: `GRAPH /${chartType.toUpperCase()}=${x} ${y ? `BY ${y}` : ''}.`,
+        data: {
+          chartType,
+          xVar: x,
+          yVar: y,
+          title: chartTitle || `${chartType.toUpperCase()} Chart of ${x}`,
+          rows: currentRows,
+        },
+      };
     }
 
-    if (output) {
-      onAnalysisComplete(output);
-      onClose();
+    return output;
+  };
+
+  // Run Analysis with Split File and Weight Cases Real Engine
+  const handleRun = async () => {
+    try {
+      // Data Management operations apply to active dataset
+      if (['compute_variable', 'sort_cases', 'select_cases', 'split_file', 'weight_cases'].includes(modalType)) {
+        const output = await executeCoreAnalysis(rows);
+        if (output) {
+          onAnalysisComplete(output);
+          onClose();
+        }
+        return;
+      }
+
+      // Real Split File Processing
+      const splitVar = splitByVariable && variables.some((v) => v.name === splitByVariable) ? splitByVariable : null;
+      if (splitVar) {
+        const rawGroupVals = rows
+          .map((r) => r[splitVar])
+          .filter((val) => val !== undefined && val !== null && String(val).trim() !== '');
+        const distinctGroupVals = Array.from(new Set(rawGroupVals)).sort((a, b) => {
+          if (typeof a === 'number' && typeof b === 'number') return a - b;
+          return String(a).localeCompare(String(b));
+        });
+
+        if (distinctGroupVals.length > 0) {
+          let hasEmitted = false;
+          for (const grpVal of distinctGroupVals) {
+            const subRows = rows.filter((r) => String(r[splitVar]) === String(grpVal));
+            if (subRows.length > 0) {
+              const out = await executeCoreAnalysis(subRows);
+              if (out) {
+                out.title = `${out.title} (${splitVar} = ${grpVal})`;
+                out.syntax = `* Split File Group: ${splitVar} = ${grpVal}.\n` + (out.syntax || '');
+                if (out.data && typeof out.data === 'object') {
+                  out.data.split_variable = splitVar;
+                  out.data.split_value = grpVal;
+                  out.data.split_group_label = `${splitVar} = ${grpVal}`;
+                }
+                onAnalysisComplete(out);
+                hasEmitted = true;
+              }
+            }
+          }
+          if (hasEmitted) {
+            onClose();
+            return;
+          }
+        }
+      }
+
+      // Standard Un-split Analysis
+      const output = await executeCoreAnalysis(rows);
+      if (output) {
+        onAnalysisComplete(output);
+        onClose();
+      }
+    } catch (err: any) {
+      alert(`Error computing analysis: ${err.message}`);
     }
   };
 
@@ -589,6 +845,30 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       syntax = `GRAPH\n  /HISTOGRAM(NORMAL)=${depVar || targetVars[0] || 'salary'}.`;
     } else if (modalType === 'scatter_regression') {
       syntax = `GRAPH\n  /SCATTERPLOT(BIVAR)=${chartXVar || 'salary'} WITH ${chartYVar || 'salbegin'}\n  /LINE(FIT)=REGRESSION.`;
+    } else if (modalType === 'boxplot_chart') {
+      syntax = factorVar
+        ? `EXAMINE VARIABLES=${depVar || targetVars[0] || 'salary'} BY ${factorVar}\n  /PLOT BOXPLOT.`
+        : `EXAMINE VARIABLES=${depVar || targetVars[0] || 'salary'}\n  /PLOT BOXPLOT.`;
+    } else if (modalType === 'qqplot_chart') {
+      syntax = `PPLOT\n  /VARIABLES=${depVar || targetVars[0] || 'salary'}\n  /TYPE=Q-Q\n  /FRACTION=BLOM\n  /STANDARDIZE=NO.`;
+    } else if (modalType === 'count_values') {
+      syntax = `COUNT ${countTargetVar}=${(targetVars.length > 0 ? targetVars : ['salary']).join(' ')}(${countConditionType === 'range' ? `${countVal1} THRU ${countVal2}` : countVal1}).\nVARIABLE LABELS ${countTargetVar} '${countTargetLabel}'.\nEXECUTE.`;
+    } else if (modalType === 'rank_cases') {
+      syntax = `RANK VARIABLES=${(targetVars.length > 0 ? targetVars : ['salary']).join(' ')}(${rankDirection === 'ascending' ? 'A' : 'D'})\n  /TIES=${rankTiesMethod.toUpperCase()}\n  /PRINT=YES.`;
+    } else if (modalType === 'visual_binning') {
+      syntax = `* Visual Binning.\nRECODE ${depVar || 'salary'} (INTO ${binningTargetVar})\n  /BINS=${binningNumBins}\n  /METHOD=${binningMethod.toUpperCase()}.\nEXECUTE.`;
+    } else if (modalType === 'transpose_data') {
+      syntax = `FLIP /VARIABLES=${(targetVars.length > 0 ? targetVars : ['salary', 'salbegin']).join(' ')}${transposeNameVar ? ` /NEWNAMES=${transposeNameVar}` : ''}.`;
+    } else if (modalType === 'restructure_data') {
+      syntax = `VARSTOCASES\n  /MAKE ${restructureMeasureName} FROM ${(targetVars.length > 0 ? targetVars : ['salary', 'salbegin']).join(' ')}\n  /INDEX=${restructureIndexName}(${targetVars.length || 2}).`;
+    } else if (modalType === 'repeated_measures_anova') {
+      syntax = `GLM ${(targetVars.length > 0 ? targetVars : ['trial1', 'trial2', 'trial3']).join(' ')}\n  /WSFACTOR=time ${targetVars.length || 3} Polynomial\n  /METHOD=SSTYPE(3)\n  /PRINT=DESCRIPTIVE ETASQ HOMOGENEITY\n  /CRITERIA=ALPHA(.05)\n  /WSDESIGN=time.`;
+    } else if (modalType === 'friedman_test') {
+      syntax = `NPAR TESTS\n  /FRIEDMAN=${(targetVars.length > 0 ? targetVars : ['trial1', 'trial2', 'trial3']).join(' ')}\n  /STATISTICS DESCRIPTIVES\n  /MISSING ANALYSIS.`;
+    } else if (modalType === 'ordinal_regression') {
+      syntax = `PLUM ${depVar || 'satisfaction'} WITH ${(targetVars.length > 0 ? targetVars : ['age', 'salary']).join(' ')}\n  /LINK=LOGIT\n  /PRINT=FIT PARAMETER SUMMARY.`;
+    } else if (modalType === 'kaplan_meier') {
+      syntax = `KM ${depVar || 'time'} BY ${factorVar || 'NONE'}\n  /STATUS=${statusVar || 'status'}(1)\n  /PRINT TABLE MEAN\n  /PLOT SURVIVAL.`;
     }
 
     onPasteSyntax(syntax);
@@ -603,6 +883,10 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     correlations: 'Bivariate Correlations',
     means_report: 'Means Report',
     partial_correlation: 'Partial Correlations',
+    repeated_measures_anova: 'General Linear Model: Repeated Measures',
+    friedman_test: 'Tests for Several Related Samples (Friedman)',
+    ordinal_regression: 'Ordinal Regression (PLUM)',
+    kaplan_meier: 'Survival: Kaplan-Meier',
     curve_estimation: 'Curve Estimation',
     chi_square_goodness: 'Chi-Square Test (Goodness of Fit)',
     binomial_test: 'Binomial Test',
@@ -611,6 +895,13 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     kmeans_cluster: 'K-Means Cluster Analysis',
     histogram_curve: 'Histogram with Normal Curve',
     scatter_regression: 'Scatter Plot with Fit Line',
+    boxplot_chart: 'Boxplot (Box and Whisker)',
+    qqplot_chart: 'Normal Q-Q Plot',
+    count_values: 'Count Occurrences of Values within Cases',
+    rank_cases: 'Rank Cases',
+    visual_binning: 'Visual Binning',
+    transpose_data: 'Transpose Dataset',
+    restructure_data: 'Restructure Data (Wide to Long)',
     one_sample_t_test: 'One-Sample T Test',
     independent_t_test: 'Independent-Samples T Test',
     paired_t_test: 'Paired-Samples T Test',
@@ -1512,6 +1803,627 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   Plots (X, Y) scatter points and computes linear regression fit line (y = mx + b) with R².
                 </div>
               </div>
+            ) : modalType === 'boxplot_chart' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <span className="spss-picker-label">Variable (Scale):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Numeric Variable --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Category / Factor Axis (Optional):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- None (Single Overall Boxplot) --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Generates SPSS Boxplot with Tukey's Hinges: Q1, Median, Q3, Whiskers at 1.5×IQR, mild outliers (○) and extreme outliers (*) labeled with Case Numbers.
+                </div>
+              </div>
+            ) : modalType === 'qqplot_chart' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <span className="spss-picker-label">Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Numeric Variable --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Produces Normal Q-Q Plot and Detrended Normal Q-Q Plot using Blom's fractional ranking against theoretical Gaussian normal quantiles.
+                </div>
+              </div>
+            ) : modalType === 'count_values' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <span className="spss-picker-label">Target Variable Name:</span>
+                    <input
+                      type="text"
+                      className="spss-text-input"
+                      value={countTargetVar}
+                      onChange={(e) => setCountTargetVar(e.target.value)}
+                      placeholder="e.g. num_matches"
+                    />
+                  </div>
+                  <div>
+                    <span className="spss-picker-label">Target Variable Label:</span>
+                    <input
+                      type="text"
+                      className="spss-text-input"
+                      value={countTargetLabel}
+                      onChange={(e) => setCountTargetLabel(e.target.value)}
+                      placeholder="e.g. Count of occurrences"
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables:</span>
+                    <div className="spss-picker-list" style={{ height: 130 }}>
+                      {variables.filter((v) => !targetVars.includes(v.name)).map((v) => (
+                        <div
+                          key={v.name}
+                          className={`spss-picker-item ${selectedSourceVar === v.name ? 'selected' : ''}`}
+                          onClick={() => setSelectedSourceVar(v.name)}
+                        >
+                          {v.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedSourceVar}
+                      onClick={() => {
+                        if (selectedSourceVar && !targetVars.includes(selectedSourceVar)) {
+                          setTargetVars([...targetVars, selectedSourceVar]);
+                          setSelectedSourceVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowRight size={14} />
+                    </button>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedTargetVar}
+                      onClick={() => {
+                        if (selectedTargetVar) {
+                          setTargetVars(targetVars.filter((t) => t !== selectedTargetVar));
+                          setSelectedTargetVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowLeft size={14} />
+                    </button>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables Selected:</span>
+                    <div className="spss-picker-list" style={{ height: 130 }}>
+                      {targetVars.map((v) => (
+                        <div
+                          key={v}
+                          className={`spss-picker-item ${selectedTargetVar === v ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(v)}
+                        >
+                          {v}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Values to Count:</span>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select
+                      className="spss-text-input"
+                      value={countConditionType}
+                      onChange={(e) => setCountConditionType(e.target.value as any)}
+                    >
+                      <option value="exact">Exact Value =</option>
+                      <option value="range">Range (Low through High)</option>
+                      <option value="greater">Value &gt;</option>
+                      <option value="less">Value &lt;</option>
+                    </select>
+                    <input
+                      type="number"
+                      className="spss-text-input"
+                      style={{ width: 80 }}
+                      value={countVal1}
+                      onChange={(e) => setCountVal1(parseFloat(e.target.value) || 0)}
+                    />
+                    {countConditionType === 'range' && (
+                      <>
+                        <span style={{ fontSize: 11 }}>THRU</span>
+                        <input
+                          type="number"
+                          className="spss-text-input"
+                          style={{ width: 80 }}
+                          value={countVal2}
+                          onChange={(e) => setCountVal2(parseFloat(e.target.value) || 0)}
+                        />
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : modalType === 'rank_cases' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables:</span>
+                    <div className="spss-picker-list" style={{ height: 140 }}>
+                      {variables.filter((v) => v.type === 'Numeric' && !targetVars.includes(v.name)).map((v) => (
+                        <div
+                          key={v.name}
+                          className={`spss-picker-item ${selectedSourceVar === v.name ? 'selected' : ''}`}
+                          onClick={() => setSelectedSourceVar(v.name)}
+                        >
+                          {v.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedSourceVar}
+                      onClick={() => {
+                        if (selectedSourceVar && !targetVars.includes(selectedSourceVar)) {
+                          setTargetVars([...targetVars, selectedSourceVar]);
+                          setSelectedSourceVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowRight size={14} />
+                    </button>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedTargetVar}
+                      onClick={() => {
+                        if (selectedTargetVar) {
+                          setTargetVars(targetVars.filter((t) => t !== selectedTargetVar));
+                          setSelectedTargetVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowLeft size={14} />
+                    </button>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variable(s) to Rank:</span>
+                    <div className="spss-picker-list" style={{ height: 140 }}>
+                      {targetVars.map((v) => (
+                        <div
+                          key={v}
+                          className={`spss-picker-item ${selectedTargetVar === v ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(v)}
+                        >
+                          {v}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, background: 'var(--bg-menu)', padding: 10, borderRadius: 4, border: '1px solid var(--border-app)' }}>
+                  <div>
+                    <span className="spss-picker-label" style={{ fontWeight: 600 }}>Assign Rank 1 to:</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginTop: 4 }}>
+                      <input
+                        type="radio"
+                        checked={rankDirection === 'ascending'}
+                        onChange={() => setRankDirection('ascending')}
+                      />
+                      Smallest value (Ascending)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, marginTop: 4 }}>
+                      <input
+                        type="radio"
+                        checked={rankDirection === 'descending'}
+                        onChange={() => setRankDirection('descending')}
+                      />
+                      Largest value (Descending)
+                    </label>
+                  </div>
+                  <div>
+                    <span className="spss-picker-label" style={{ fontWeight: 600 }}>Ties Method:</span>
+                    <select
+                      className="spss-text-input"
+                      value={rankTiesMethod}
+                      onChange={(e) => setRankTiesMethod(e.target.value as any)}
+                    >
+                      <option value="mean">Mean (Average Rank)</option>
+                      <option value="low">Low (Smallest Rank)</option>
+                      <option value="high">High (Largest Rank)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : modalType === 'visual_binning' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <span className="spss-picker-label">Variable to Bin (Continuous Scale):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Numeric Variable --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <span className="spss-picker-label">Binned Variable Name:</span>
+                    <input
+                      type="text"
+                      className="spss-text-input"
+                      value={binningTargetVar}
+                      onChange={(e) => setBinningTargetVar(e.target.value)}
+                      placeholder="e.g. salary_bin"
+                    />
+                  </div>
+                  <div>
+                    <span className="spss-picker-label">Number of Bins / Intervals:</span>
+                    <input
+                      type="number"
+                      min="2"
+                      max="10"
+                      className="spss-text-input"
+                      value={binningNumBins}
+                      onChange={(e) => setBinningNumBins(Math.max(2, Math.min(10, parseInt(e.target.value) || 3)))}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Binning Method:</span>
+                  <select
+                    className="spss-text-input"
+                    value={binningMethod}
+                    onChange={(e) => setBinningMethod(e.target.value as any)}
+                  >
+                    <option value="equal_width">Equal Width Intervals (Equal Range)</option>
+                    <option value="equal_percentile">Equal Percentiles (Equal Cases per Bin)</option>
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Generates an ordinal categorical variable with automatic value labels reflecting cutpoint intervals.
+                </div>
+              </div>
+            ) : modalType === 'transpose_data' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables:</span>
+                    <div className="spss-picker-list" style={{ height: 140 }}>
+                      {variables.filter((v) => !targetVars.includes(v.name)).map((v) => (
+                        <div
+                          key={v.name}
+                          className={`spss-picker-item ${selectedSourceVar === v.name ? 'selected' : ''}`}
+                          onClick={() => setSelectedSourceVar(v.name)}
+                        >
+                          {v.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedSourceVar}
+                      onClick={() => {
+                        if (selectedSourceVar && !targetVars.includes(selectedSourceVar)) {
+                          setTargetVars([...targetVars, selectedSourceVar]);
+                          setSelectedSourceVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowRight size={14} />
+                    </button>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedTargetVar}
+                      onClick={() => {
+                        if (selectedTargetVar) {
+                          setTargetVars(targetVars.filter((t) => t !== selectedTargetVar));
+                          setSelectedTargetVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowLeft size={14} />
+                    </button>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables to Transpose:</span>
+                    <div className="spss-picker-list" style={{ height: 140 }}>
+                      {targetVars.map((v) => (
+                        <div
+                          key={v}
+                          className={`spss-picker-item ${selectedTargetVar === v ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(v)}
+                        >
+                          {v}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Name Variable (Optional, supplies new column names):</span>
+                  <select
+                    className="spss-text-input"
+                    value={transposeNameVar}
+                    onChange={(e) => setTransposeNameVar(e.target.value)}
+                  >
+                    <option value="">-- None (Use CASE_1, CASE_2, ...) --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Flips (rotates) the dataset: variables become cases and cases become variables.
+                </div>
+              </div>
+            ) : modalType === 'restructure_data' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <span className="spss-picker-label">Case Identifier Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={restructureIdVar}
+                    onChange={(e) => setRestructureIdVar(e.target.value)}
+                  >
+                    <option value="id">id (Default)</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Variables:</span>
+                    <div className="spss-picker-list" style={{ height: 130 }}>
+                      {variables.filter((v) => !targetVars.includes(v.name)).map((v) => (
+                        <div
+                          key={v.name}
+                          className={`spss-picker-item ${selectedSourceVar === v.name ? 'selected' : ''}`}
+                          onClick={() => setSelectedSourceVar(v.name)}
+                        >
+                          {v.name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8 }}>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedSourceVar}
+                      onClick={() => {
+                        if (selectedSourceVar && !targetVars.includes(selectedSourceVar)) {
+                          setTargetVars([...targetVars, selectedSourceVar]);
+                          setSelectedSourceVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowRight size={14} />
+                    </button>
+                    <button
+                      className="spss-btn"
+                      disabled={!selectedTargetVar}
+                      onClick={() => {
+                        if (selectedTargetVar) {
+                          setTargetVars(targetVars.filter((t) => t !== selectedTargetVar));
+                          setSelectedTargetVar(null);
+                        }
+                      }}
+                    >
+                      <ArrowLeft size={14} />
+                    </button>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <span className="spss-picker-label">Repeated Measures to Combine:</span>
+                    <div className="spss-picker-list" style={{ height: 130 }}>
+                      {targetVars.map((v) => (
+                        <div
+                          key={v}
+                          className={`spss-picker-item ${selectedTargetVar === v ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(v)}
+                        >
+                          {v}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div>
+                    <span className="spss-picker-label">New Measure Variable Name:</span>
+                    <input
+                      type="text"
+                      className="spss-text-input"
+                      value={restructureMeasureName}
+                      onChange={(e) => setRestructureMeasureName(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="spss-picker-label">New Index Variable Name:</span>
+                    <input
+                      type="text"
+                      className="spss-text-input"
+                      value={restructureIndexName}
+                      onChange={(e) => setRestructureIndexName(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Restructures chosen repeated variables into multiple case rows (Wide to Long).
+                </div>
+              </div>
+            ) : modalType === 'repeated_measures_anova' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Within-Subjects Variables (Repeated Measures):</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.map((tv) => {
+                      const meta = variables.find((v) => v.name === tv);
+                      return (
+                        <div
+                          key={tv}
+                          className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(tv)}
+                          onDoubleClick={handleMoveToSource}
+                        >
+                          {meta && renderIcon(meta)}
+                          <span>{tv}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                    Double-click or use arrow to add/remove repeated measures. (Minimum 2).
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Between-Subjects Factor (Optional):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- None (Pure Within-Subjects) --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : modalType === 'friedman_test' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Test Variables (Related Conditions):</span>
+                  <div className="spss-var-listbox" style={{ height: 160 }}>
+                    {targetVars.map((tv) => {
+                      const meta = variables.find((v) => v.name === tv);
+                      return (
+                        <div
+                          key={tv}
+                          className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(tv)}
+                          onDoubleClick={handleMoveToSource}
+                        >
+                          {meta && renderIcon(meta)}
+                          <span>{tv}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Select two or more related numeric variables to run Friedman Chi-Square test.
+                  </div>
+                </div>
+              </div>
+            ) : modalType === 'ordinal_regression' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Dependent Variable (Ordinal):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Ordinal Target --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Factors / Covariates:</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.filter((v) => v !== depVar).map((tv) => {
+                      const meta = variables.find((v) => v.name === tv);
+                      return (
+                        <div
+                          key={tv}
+                          className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(tv)}
+                          onDoubleClick={handleMoveToSource}
+                        >
+                          {meta && renderIcon(meta)}
+                          <span>{tv}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : modalType === 'kaplan_meier' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Time Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Time-to-Event --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Status Variable (1 = Event, 0 = Censored):</span>
+                  <select
+                    className="spss-text-input"
+                    value={statusVar}
+                    onChange={(e) => setStatusVar(e.target.value)}
+                  >
+                    <option value="">-- Select Event Status --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Factor / Strata Variable (Optional):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- None (Single Cohort) --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             ) : modalType === 'chart_builder' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
@@ -1602,6 +2514,9 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
             <button
               className="spss-btn"
               onClick={() => {
+                if (modalType) {
+                  delete spssDialogMemoryCache[modalType];
+                }
                 setTargetVars([]);
                 setSelectedSourceVar(null);
                 setSelectedTargetVar(null);
@@ -1613,6 +2528,8 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                 setGroupVar('');
                 setControlVar('');
                 setIndepVar('');
+                setStatusVar('');
+                setTestValue(0);
               }}
               title="Reset dialog state"
             >

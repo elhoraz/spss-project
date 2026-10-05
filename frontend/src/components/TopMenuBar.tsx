@@ -21,7 +21,7 @@ import { AnalysisModalType, ActiveView } from '../types/spss';
 interface TopMenuBarProps {
   onOpenModal: (modal: AnalysisModalType) => void;
   onSetActiveView: (view: ActiveView) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word') => void;
   onResetData: () => void;
   onNewData: () => void;
   onToggleValueLabels: () => void;
@@ -32,6 +32,8 @@ interface TopMenuBarProps {
   canRedo?: boolean;
   onGoToCase?: () => void;
   onFindReplace?: () => void;
+  recentFiles?: string[];
+  onSelectRecentFile?: (filename: string) => void;
 }
 
 export const TopMenuBar: React.FC<TopMenuBarProps> = ({
@@ -48,6 +50,8 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   canRedo,
   onGoToCase,
   onFindReplace,
+  recentFiles,
+  onSelectRecentFile,
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -92,10 +96,29 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('import_data'))}>
               <div className="spss-dropdown-item-left">
-                <FolderOpen size={14} /> Open Data (CSV, Excel, JSON)...
+                <FolderOpen size={14} /> Open Data (SAV, CSV, Excel, JSON)...
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+O</span>
             </div>
+            {recentFiles && recentFiles.length > 0 && (
+              <div className="spss-dropdown-item">
+                <div className="spss-dropdown-item-left">
+                  <Database size={14} /> Recently Used Data
+                </div>
+                <ChevronRight size={14} />
+                <div className="spss-submenu">
+                  {recentFiles.map((rf, idx) => (
+                    <div
+                      key={idx}
+                      className="spss-dropdown-item"
+                      onClick={() => handleAction(() => onSelectRecentFile?.(rf))}
+                    >
+                      <span style={{ color: 'var(--accent)', fontWeight: 600, marginRight: 6 }}>{idx + 1}</span> {rf}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="spss-dropdown-item" onClick={() => handleAction(onResetData)}>
               <div className="spss-dropdown-item-left">
                 <Database size={14} /> Reset to Sample Dataset
@@ -104,9 +127,14 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-divider" />
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('sav'))}>
               <div className="spss-dropdown-item-left">
-                <Save size={14} /> Save As SPSS Dataset (.sav.json)...
+                <Save size={14} /> Save As SPSS Binary File (*.sav)...
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+S</span>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('sav_json'))}>
+              <div className="spss-dropdown-item-left">
+                <Save size={14} /> Save As SPSS Dataset (*.sav.json)...
+              </div>
             </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('xlsx'))}>
               <div className="spss-dropdown-item-left">
@@ -290,6 +318,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('merge_files'))}>
               Merge Files...
             </div>
+            <div className="spss-dropdown-divider" />
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('transpose_data'))}>
+              Transpose (Flip Data)...
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('restructure_data'))}>
+              Restructure Data (Wide to Long)...
+            </div>
           </div>
         )}
       </div>
@@ -315,8 +350,17 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               Recode into Same Variables...
             </div>
             <div className="spss-dropdown-divider" />
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('visual_binning'))}>
+              Visual Binning...
+            </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('automatic_recode'))}>
               Automatic Recode...
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('count_values'))}>
+              Count Values within Cases...
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('rank_cases'))}>
+              Rank Cases...
             </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('replace_missing'))}>
               Replace Missing Values...
@@ -396,6 +440,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('ancova'))}>
                   Univariate (ANCOVA)...
                 </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('repeated_measures_anova'))}>
+                  Repeated Measures...
+                </div>
               </div>
             </div>
 
@@ -430,6 +477,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('logistic_regression'))}>
                   Binary Logistic Regression...
+                </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('ordinal_regression'))}>
+                  Ordinal Regression (PLUM)...
                 </div>
               </div>
             </div>
@@ -485,6 +535,22 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('kruskal_wallis'))}>
                   K Independent Samples (Kruskal-Wallis)...
                 </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('friedman_test'))}>
+                  K Related Samples (Friedman)...
+                </div>
+              </div>
+            </div>
+
+            {/* Survival Submenu */}
+            <div className="spss-dropdown-item">
+              <div className="spss-dropdown-item-left">
+                <BarChart2 size={14} /> Survival
+              </div>
+              <ChevronRight size={14} />
+              <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('kaplan_meier'))}>
+                  Kaplan-Meier...
+                </div>
               </div>
             </div>
 
@@ -529,6 +595,16 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <BarChart2 size={14} /> Scatter Plot with Fit Line...
               </div>
             </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('boxplot_chart'))}>
+              <div className="spss-dropdown-item-left">
+                <BarChart2 size={14} /> Boxplot (Box and Whisker)...
+              </div>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('qqplot_chart'))}>
+              <div className="spss-dropdown-item-left">
+                <BarChart2 size={14} /> Normal Q-Q Plot...
+              </div>
+            </div>
             <div className="spss-dropdown-divider" />
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
               Legacy Dialogs: Bar...
@@ -536,13 +612,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
               Legacy Dialogs: Pie...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('histogram_curve'))}>
               Legacy Dialogs: Histogram...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('scatter_regression'))}>
               Legacy Dialogs: Scatter/Dot...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('boxplot_chart'))}>
               Legacy Dialogs: Boxplot...
             </div>
           </div>

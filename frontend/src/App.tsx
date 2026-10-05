@@ -108,6 +108,45 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [dataset, outputs]);
 
+  // Recent files tracking
+  const [recentFiles, setRecentFiles] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('openspss_recent_files');
+      return saved ? JSON.parse(saved) : ['Employee data.sav', 'Clinical Trial.sav'];
+    } catch {
+      return ['Employee data.sav', 'Clinical Trial.sav'];
+    }
+  });
+
+  const recordRecentFile = (name: string) => {
+    setRecentFiles((prev) => {
+      const filtered = prev.filter((f) => f !== name);
+      const updated = [name, ...filtered].slice(0, 8);
+      try {
+        localStorage.setItem('openspss_recent_files', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const handleSelectRecentFile = (name: string) => {
+    if (name === 'Employee data.sav' || name.includes('Employee')) {
+      handleSelectSampleDataset('Employee data.sav');
+    } else if (name === 'Clinical Trial.sav' || name.includes('Clinical')) {
+      handleSelectSampleDataset('Clinical Trial.sav');
+    } else {
+      try {
+        const saved = localStorage.getItem(`openspss_dataset_${name}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          handleDatasetLoaded(parsed);
+          return;
+        }
+      } catch {}
+      setActiveModal('import_data');
+    }
+  };
+
   // Backend server connection state
   const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
 
@@ -209,6 +248,13 @@ export const App: React.FC = () => {
         e.preventDefault();
         setActiveView('data');
         setShowFindReplace(true);
+        return;
+      }
+
+      // Global Print / Export PDF (Ctrl+P)
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        handleExport('pdf');
         return;
       }
 
@@ -377,6 +423,15 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, rows: updatedRows });
   };
 
+  // Delete multiple rows (cases) by indices
+  const handleDeleteRows = (rowIndices: number[]) => {
+    if (rowIndices.length === 0) return;
+    pushHistory(dataset);
+    const indexSet = new Set(rowIndices);
+    const updatedRows = dataset.rows.filter((_, i) => !indexSet.has(i));
+    setDataset({ ...dataset, rows: updatedRows });
+  };
+
   // Add variable
   const handleAddVariable = () => {
     pushHistory(dataset);
@@ -453,6 +508,24 @@ export const App: React.FC = () => {
     if (idx !== -1) {
       handleUpdateVariable(idx, { columns: newCols });
     }
+  };
+
+  // Reorder variables (from drag or move up/down in Variable View)
+  const handleReorderVariables = (fromIndex: number, toIndex: number) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= dataset.variables.length ||
+      toIndex >= dataset.variables.length
+    ) {
+      return;
+    }
+    pushHistory(dataset);
+    const newVars = [...dataset.variables];
+    const [moved] = newVars.splice(fromIndex, 1);
+    newVars.splice(toIndex, 0, moved);
+    setDataset({ ...dataset, variables: newVars });
   };
 
   // Bulk update rows (from Find & Replace All)
@@ -544,13 +617,16 @@ export const App: React.FC = () => {
 
   // Switch between sample datasets
   const handleSelectSampleDataset = (name: string) => {
+    pushHistory(dataset);
     if (name.includes('Clinical')) {
       setDataset(clinicalTrialDataset);
+      recordRecentFile('Clinical Trial.sav');
       setOutputs([
         clientComputeDescriptives(clinicalTrialDataset.rows, ['baseline_bp', 'post_bp', 'cholesterol']),
       ]);
     } else {
       setDataset(employeeDataset);
+      recordRecentFile('Employee data.sav');
       setOutputs([
         clientComputeFrequencies(employeeDataset.rows, ['gender', 'jobcat']),
         clientComputeDescriptives(employeeDataset.rows, ['salary', 'salbegin', 'educ']),
@@ -558,8 +634,19 @@ export const App: React.FC = () => {
     }
   };
 
-  // Export functions (PDF, Word, Excel, CSV, SPSS JSON)
-  const handleExport = (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => {
+  // Dataset loaded handler (from file upload or recent file)
+  const handleDatasetLoaded = (newDs: Dataset) => {
+    pushHistory(dataset);
+    setDataset(newDs);
+    recordRecentFile(newDs.name);
+    try {
+      localStorage.setItem(`openspss_dataset_${newDs.name}`, JSON.stringify(newDs));
+    } catch {}
+    setActiveView('data');
+  };
+
+  // Export functions (PDF, Word, Excel, CSV, Binary SPSS .sav, SPSS JSON)
+  const handleExport = async (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word') => {
     if (format === 'pdf') {
       setActiveView('output');
       setTimeout(() => {
@@ -588,6 +675,44 @@ export const App: React.FC = () => {
     }
 
     if (format === 'sav') {
+      // Try exporting as true binary .sav via backend pyreadstat
+      try {
+        const res = await fetch('/api/datasets/export-sav', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataset }),
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          const fileName = dataset.name.endsWith('.sav') ? dataset.name : `${dataset.name}.sav`;
+          link.setAttribute('download', fileName);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          return;
+        }
+      } catch (err) {
+        console.warn('Backend binary .sav export failed, falling back to JSON', err);
+      }
+      // Fallback to JSON .sav.json
+      const jsonStr = JSON.stringify(dataset, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${dataset.name.replace('.sav', '')}.sav.json`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    if (format === 'sav_json') {
       const jsonStr = JSON.stringify(dataset, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -663,6 +788,8 @@ export const App: React.FC = () => {
         onRedo={handleRedo}
         canUndo={canUndo}
         canRedo={canRedo}
+        recentFiles={recentFiles}
+        onSelectRecentFile={handleSelectRecentFile}
         onGoToCase={() => {
           setActiveView('data');
           setShowGoToCase(true);
@@ -707,6 +834,7 @@ export const App: React.FC = () => {
               onInsertRow={handleInsertRow}
               onInsertVariable={handleInsertVariable}
               onDeleteRow={handleDeleteRow}
+              onDeleteRows={handleDeleteRows}
               onDeleteVariable={handleDeleteVariableByName}
               onResizeColumn={handleResizeColumn}
               onClearCells={handleClearCells}
@@ -729,6 +857,7 @@ export const App: React.FC = () => {
               }}
               onAddVariable={handleAddVariable}
               onDeleteVariable={handleDeleteVariable}
+              onReorderVariables={handleReorderVariables}
             />
           )}
 
@@ -888,6 +1017,11 @@ export const App: React.FC = () => {
             setDataset((prev) => ({ ...prev, rows: newRows }));
           }
         }}
+        onReplaceEntireDataset={(newVars, newRows) => {
+          pushHistory(dataset);
+          setDataset({ ...dataset, variables: newVars, rows: newRows });
+          setActiveView('data');
+        }}
       />
 
       {activeModal === 'value_labels' && editingVariable && (
@@ -907,10 +1041,7 @@ export const App: React.FC = () => {
       <ImportExportModal
         isOpen={activeModal === 'import_data'}
         onClose={() => setActiveModal(null)}
-        onDatasetLoaded={(newDs) => {
-          setDataset(newDs);
-          setActiveView('data');
-        }}
+        onDatasetLoaded={handleDatasetLoaded}
       />
 
       <AboutModal
