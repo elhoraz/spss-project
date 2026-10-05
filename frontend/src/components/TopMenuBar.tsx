@@ -21,7 +21,7 @@ import { AnalysisModalType, ActiveView } from '../types/spss';
 interface TopMenuBarProps {
   onOpenModal: (modal: AnalysisModalType) => void;
   onSetActiveView: (view: ActiveView) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => void;
   onResetData: () => void;
   onNewData: () => void;
   onToggleValueLabels: () => void;
@@ -123,6 +123,11 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <Printer size={14} /> Export Report to PDF...
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+P</span>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('word'))}>
+              <div className="spss-dropdown-item-left">
+                <FileText size={14} /> Export Report to Word (.doc)...
+              </div>
             </div>
             <div className="spss-dropdown-divider" />
             <div className="spss-dropdown-item" onClick={() => handleAction(() => window.print())}>
@@ -302,6 +307,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('recode_same'))}>
               Recode into Same Variables...
             </div>
+            <div className="spss-dropdown-divider" />
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('automatic_recode'))}>
+              Automatic Recode...
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('replace_missing'))}>
+              Replace Missing Values...
+            </div>
           </div>
         )}
       </div>
@@ -346,6 +358,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               </div>
               <ChevronRight size={14} />
               <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('means_report'))}>
+                  Means...
+                </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('one_sample_t_test'))}>
                   One-Sample T Test...
                 </div>
@@ -374,6 +389,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('correlations'))}>
                   Bivariate (Pearson, Spearman)...
                 </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('partial_correlation'))}>
+                  Partial...
+                </div>
               </div>
             </div>
 
@@ -386,6 +404,9 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               <div className="spss-submenu">
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('linear_regression'))}>
                   Linear & Multiple Regression...
+                </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('curve_estimation'))}>
+                  Curve Estimation...
                 </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('logistic_regression'))}>
                   Binary Logistic Regression...
@@ -413,6 +434,15 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               </div>
               <ChevronRight size={14} />
               <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chi_square_goodness'))}>
+                  Chi-Square (Goodness of Fit)...
+                </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('binomial_test'))}>
+                  Binomial...
+                </div>
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('runs_test'))}>
+                  Runs Test...
+                </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('mann_whitney'))}>
                   Two Independent Samples (Mann-Whitney U)...
                 </div>

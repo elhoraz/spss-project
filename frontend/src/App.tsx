@@ -14,19 +14,33 @@ import { ServerSettingsModal } from './components/ServerSettingsModal';
 import { GoToCaseDialog } from './components/GoToCaseDialog';
 import { FindReplaceDialog } from './components/FindReplaceDialog';
 import { RecodeModal } from './components/RecodeModal';
+import { AutomaticRecodeModal } from './components/AutomaticRecodeModal';
+import { ReplaceMissingModal } from './components/ReplaceMissingModal';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
 import { statsApiService } from './services/api';
+import { exportReportToPdf, exportReportToWord, exportReportToExcel } from './utils/exportUtils';
+import { saveSessionToStorage, loadSessionFromStorage } from './utils/storage';
 
 export const App: React.FC = () => {
-  // Application State
-  const [dataset, setDataset] = useState<Dataset>(employeeDataset);
+  // Application State - Restore from localStorage if previous session exists
+  const [dataset, setDataset] = useState<Dataset>(() => {
+    const saved = loadSessionFromStorage();
+    if (saved.dataset && saved.dataset.variables && saved.dataset.variables.length > 0) {
+      return saved.dataset;
+    }
+    return employeeDataset;
+  });
   const [activeView, setActiveView] = useState<ActiveView>('data');
   const [showValueLabels, setShowValueLabels] = useState<boolean>(true);
   const [theme, setTheme] = useState<AppTheme>('spss-classic');
   const [activeModal, setActiveModal] = useState<AnalysisModalType>(null);
   const [valueLabelsVarName, setValueLabelsVarName] = useState<string | null>(null);
+
+  // Split File & Weight Cases states
+  const [splitByVariable, setSplitByVariable] = useState<string | null>(null);
+  const [weightByVariable, setWeightByVariable] = useState<string | null>(null);
 
   // Jump / Focus navigation state
   const [showGoToCase, setShowGoToCase] = useState<boolean>(false);
@@ -70,8 +84,12 @@ export const App: React.FC = () => {
     `* IBM SPSS Statistics Syntax\nFREQUENCIES VARIABLES=gender jobcat.\nDESCRIPTIVES VARIABLES=salary salbegin educ.`
   );
 
-  // Generate initial descriptive output for instant satisfaction upon load!
+  // Generate initial descriptive output or restore from storage
   const [outputs, setOutputs] = useState<OutputItem[]>(() => {
+    const saved = loadSessionFromStorage();
+    if (saved.outputs && saved.outputs.length > 0) {
+      return saved.outputs;
+    }
     const initFreq = clientComputeFrequencies(employeeDataset.rows, ['gender', 'jobcat'], {
       gender: { m: 'Male', f: 'Female' },
       jobcat: { '1': 'Clerical', '2': 'Custodial', '3': 'Manager' },
@@ -79,6 +97,14 @@ export const App: React.FC = () => {
     const initDesc = clientComputeDescriptives(employeeDataset.rows, ['salary', 'salbegin', 'educ']);
     return [initFreq, initDesc];
   });
+
+  // Session auto-save to localStorage
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      saveSessionToStorage(dataset, outputs);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [dataset, outputs]);
 
   // Backend server connection state
   const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
@@ -530,15 +556,26 @@ export const App: React.FC = () => {
     }
   };
 
-  // Export functions
-  const handleExport = (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => {
+  // Export functions (PDF, Word, Excel, CSV, SPSS JSON)
+  const handleExport = (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => {
     if (format === 'pdf') {
       setActiveView('output');
-      setTimeout(() => window.print(), 200);
+      setTimeout(() => {
+        exportReportToPdf(dataset.name);
+      }, 300);
+      return;
+    }
+
+    if (format === 'word') {
+      exportReportToWord(outputs, dataset.name);
       return;
     }
 
     if (format === 'xlsx') {
+      if (activeView === 'output' && outputs.length > 0) {
+        exportReportToExcel(outputs, dataset.name);
+        return;
+      }
       const wb = XLSX.utils.book_new();
       const wsData = XLSX.utils.json_to_sheet(dataset.rows);
       XLSX.utils.book_append_sheet(wb, wsData, 'Data View');
@@ -558,6 +595,7 @@ export const App: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
       return;
     }
 
@@ -572,6 +610,7 @@ export const App: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -780,8 +819,30 @@ export const App: React.FC = () => {
               <span>{isBackendOnline ? 'Backend: Online (Render / Python)' : 'Engine: Client-Side (Dual-Mode)'}</span>
             </div>
             <span>Filter off</span>
-            <span>Weight off</span>
-            <span>Split File off</span>
+            <span
+              onClick={() => setActiveModal('weight_cases')}
+              style={{
+                cursor: 'pointer',
+                color: weightByVariable ? '#1d4ed8' : undefined,
+                fontWeight: weightByVariable ? 600 : undefined,
+                textDecoration: 'underline dotted',
+              }}
+              title="Click to configure Weight Cases"
+            >
+              {weightByVariable ? `Weight on (${weightByVariable})` : 'Weight off'}
+            </span>
+            <span
+              onClick={() => setActiveModal('split_file')}
+              style={{
+                cursor: 'pointer',
+                color: splitByVariable ? '#1d4ed8' : undefined,
+                fontWeight: splitByVariable ? 600 : undefined,
+                textDecoration: 'underline dotted',
+              }}
+              title="Click to configure Split File"
+            >
+              {splitByVariable ? `Split File on (${splitByVariable})` : 'Split File off'}
+            </span>
           </div>
         </div>
       </div>
@@ -791,6 +852,10 @@ export const App: React.FC = () => {
         modalType={activeModal}
         variables={dataset.variables}
         rows={dataset.rows}
+        splitByVariable={splitByVariable}
+        weightByVariable={weightByVariable}
+        onSetSplitByVariable={setSplitByVariable}
+        onSetWeightByVariable={setWeightByVariable}
         onClose={() => setActiveModal(null)}
         onAnalysisComplete={handleAnalysisComplete}
         onPasteSyntax={handlePasteSyntax}
@@ -913,6 +978,42 @@ export const App: React.FC = () => {
           }}
         />
       )}
+
+      {/* Automatic Recode Modal */}
+      <AutomaticRecodeModal
+        isOpen={activeModal === 'automatic_recode'}
+        variables={dataset.variables}
+        rows={dataset.rows}
+        onClose={() => setActiveModal(null)}
+        onApply={(newRows, newVar, output) => {
+          pushHistory(dataset);
+          const exists = dataset.variables.some((v) => v.name === newVar.name);
+          const updatedVars = exists
+            ? dataset.variables.map((v) => (v.name === newVar.name ? newVar : v))
+            : [...dataset.variables, newVar];
+          setDataset({ ...dataset, variables: updatedVars, rows: newRows });
+          setOutputs((prev) => [output, ...prev]);
+          setActiveView('output');
+        }}
+      />
+
+      {/* Replace Missing Values Modal */}
+      <ReplaceMissingModal
+        isOpen={activeModal === 'replace_missing'}
+        variables={dataset.variables}
+        rows={dataset.rows}
+        onClose={() => setActiveModal(null)}
+        onApply={(newRows, newVar, output) => {
+          pushHistory(dataset);
+          const exists = dataset.variables.some((v) => v.name === newVar.name);
+          const updatedVars = exists
+            ? dataset.variables.map((v) => (v.name === newVar.name ? newVar : v))
+            : [...dataset.variables, newVar];
+          setDataset({ ...dataset, variables: updatedVars, rows: newRows });
+          setOutputs((prev) => [output, ...prev]);
+          setActiveView('output');
+        }}
+      />
     </div>
   );
 };

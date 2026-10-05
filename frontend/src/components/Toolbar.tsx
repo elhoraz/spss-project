@@ -30,7 +30,7 @@ interface ToolbarProps {
   onToggleTheme: () => void;
   datasetName: string;
   onSelectSampleDataset: (name: string) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => void;
   onNewData: () => void;
   onUndo?: () => void;
   onRedo?: () => void;

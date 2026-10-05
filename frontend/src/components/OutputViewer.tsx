@@ -24,7 +24,7 @@ interface OutputViewerProps {
   outputs: OutputItem[];
   onClearOutputs: () => void;
   onDeleteOutputItem?: (id: string) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'word') => void;
 }
 
 export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onDeleteOutputItem, onExport }) => {
@@ -1472,11 +1472,356 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </div>
           ) : chartType === 'line' ? (
             <Line data={chartData} />
+          ) : chartType === 'boxplot' ? (
+            <div style={{ padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--text-main)' }}>
+                Boxplot of {xVar}
+              </div>
+              {(() => {
+                const nums = xVals.map((v: any) => parseFloat(v)).filter((v: number) => !isNaN(v)).sort((a: number, b: number) => a - b);
+                if (nums.length < 4) {
+                  return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Not enough numeric data for boxplot.</div>;
+                }
+                const min = nums[0];
+                const max = nums[nums.length - 1];
+                const q1 = nums[Math.floor(nums.length * 0.25)];
+                const med = nums[Math.floor(nums.length * 0.5)];
+                const q3 = nums[Math.floor(nums.length * 0.75)];
+                const iqr = q3 - q1;
+                const lowerWhisker = Math.max(min, q1 - 1.5 * iqr);
+                const upperWhisker = Math.min(max, q3 + 1.5 * iqr);
+                const outliers = nums.filter((v: number) => v < lowerWhisker || v > upperWhisker);
+
+                const range = (max - min) || 1;
+                const toY = (val: number) => 180 - ((val - min) / range) * 150;
+
+                return (
+                  <svg width="100%" height="220" viewBox="0 0 300 220" style={{ background: '#f8fafc', borderRadius: 4 }}>
+                    {/* Y Axis line */}
+                    <line x1="60" y1="20" x2="60" y2="190" stroke="#94a3b8" strokeWidth="1.5" />
+                    {/* Axis Ticks */}
+                    <text x="50" y={toY(max) + 4} textAnchor="end" fontSize="10" fill="#64748b">{max.toFixed(1)}</text>
+                    <text x="50" y={toY(med) + 4} textAnchor="end" fontSize="10" fill="#0284c7" fontWeight="bold">{med.toFixed(1)}</text>
+                    <text x="50" y={toY(min) + 4} textAnchor="end" fontSize="10" fill="#64748b">{min.toFixed(1)}</text>
+
+                    {/* Whisker line */}
+                    <line x1="150" y1={toY(lowerWhisker)} x2="150" y2={toY(upperWhisker)} stroke="#334155" strokeWidth="1.5" strokeDasharray="3 3" />
+                    {/* Whisker caps */}
+                    <line x1="130" y1={toY(upperWhisker)} x2="170" y2={toY(upperWhisker)} stroke="#334155" strokeWidth="2" />
+                    <line x1="130" y1={toY(lowerWhisker)} x2="170" y2={toY(lowerWhisker)} stroke="#334155" strokeWidth="2" />
+
+                    {/* Box IQR */}
+                    <rect
+                      x="110"
+                      y={toY(q3)}
+                      width="80"
+                      height={Math.max(4, toY(q1) - toY(q3))}
+                      fill="#e0f2fe"
+                      stroke="#0284c7"
+                      strokeWidth="2"
+                    />
+
+                    {/* Median Line */}
+                    <line x1="110" y1={toY(med)} x2="190" y2={toY(med)} stroke="#0369a1" strokeWidth="3" />
+
+                    {/* Outliers */}
+                    {outliers.map((out: number, idx: number) => (
+                      <circle key={idx} cx="150" cy={toY(out)} r="3.5" fill="#ef4444" stroke="#991b1b" />
+                    ))}
+
+                    <text x="150" y="210" textAnchor="middle" fontSize="11" fontWeight="600" fill="#334155">{xVar}</text>
+                  </svg>
+                );
+              })()}
+            </div>
           ) : (
             <Bar data={chartData} />
           )}
         </div>
       );
+    }
+
+    // 10. MEANS REPORT
+    if (type === 'means_report') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {data.tables?.map((table: any, tIdx: number) => (
+            <div key={tIdx} className="spss-pivot-table-wrapper">
+              <div className="spss-pivot-title">Report: {table.dependent_variable} by {table.factor_variable}</div>
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left">{table.factor_variable}</th>
+                    <th>Mean</th>
+                    <th>N</th>
+                    <th>Std. Deviation</th>
+                    <th>Std. Error</th>
+                    <th>Median</th>
+                    <th>Minimum</th>
+                    <th>Maximum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows?.map((r: any, rIdx: number) => (
+                    <tr key={rIdx} className={r.group === 'Total' ? 'spss-pivot-total-row' : ''}>
+                      <td className="align-left" style={{ fontWeight: r.group === 'Total' ? 700 : 500 }}>
+                        {r.group}
+                      </td>
+                      <td>{r.mean}</td>
+                      <td>{r.n}</td>
+                      <td>{r.std_dev}</td>
+                      <td>{r.se_mean}</td>
+                      <td>{r.median}</td>
+                      <td>{r.min}</td>
+                      <td>{r.max}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // 11. PARTIAL CORRELATIONS
+    if (type === 'partial_correlation') {
+      return (
+        <div className="spss-pivot-table-wrapper">
+          <div className="spss-pivot-title">Correlations (Controlling for {data.control_variables?.join(', ')})</div>
+          <table className="spss-pivot-table">
+            <thead>
+              <tr>
+                <th className="align-left">Variable 1</th>
+                <th className="align-left">Variable 2</th>
+                <th>Partial Correlation (r)</th>
+                <th>df</th>
+                <th>Sig. (2-tailed)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows?.map((r: any, rIdx: number) => (
+                <tr key={rIdx}>
+                  <td className="align-left" style={{ fontWeight: 600 }}>{r.var1}</td>
+                  <td className="align-left">{r.var2}</td>
+                  <td style={{ fontWeight: 600 }}>{r.correlation}</td>
+                  <td>{r.df}</td>
+                  <td style={{ color: r.sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: r.sig < 0.05 ? 600 : 400 }}>
+                    {r.sig < 0.001 ? '< .001' : r.sig}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="spss-pivot-notes">a. Cells contain zero-order (Pearson) correlations adjusted for control variables.</div>
+        </div>
+      );
+    }
+
+    // 12. CURVE ESTIMATION
+    if (type === 'curve_estimation') {
+      return (
+        <div className="spss-pivot-table-wrapper">
+          <div className="spss-pivot-title">Model Description & Summary: {data.dependent_variable} vs {data.independent_variable}</div>
+          <table className="spss-pivot-table">
+            <thead>
+              <tr>
+                <th className="align-left">Model</th>
+                <th>R Square</th>
+                <th>Adjusted R²</th>
+                <th>Std. Error</th>
+                <th>F</th>
+                <th>df1</th>
+                <th>df2</th>
+                <th>Sig.</th>
+                <th>Constant (b0)</th>
+                <th>b1</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.models?.map((m: any, mIdx: number) => (
+                <tr key={mIdx}>
+                  <td className="align-left" style={{ fontWeight: 600 }}>{m.model}</td>
+                  <td>{m.r_square}</td>
+                  <td>{m.adj_r_square}</td>
+                  <td>{m.std_error}</td>
+                  <td>{m.f}</td>
+                  <td>{m.df1}</td>
+                  <td>{m.df2}</td>
+                  <td style={{ color: m.sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: m.sig < 0.05 ? 600 : 400 }}>
+                    {m.sig < 0.001 ? '< .001' : m.sig}
+                  </td>
+                  <td>{m.b0}</td>
+                  <td>{m.b1}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="spss-pivot-notes">The dependent variable is {data.dependent_variable}. N = {data.n}.</div>
+        </div>
+      );
+    }
+
+    // 13. CHI-SQUARE GOODNESS OF FIT
+    if (type === 'chi_square_goodness') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">{data.variable} Frequencies</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Category</th>
+                  <th>Observed N</th>
+                  <th>Expected N</th>
+                  <th>Residual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.frequencies?.map((f: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 500 }}>{f.category}</td>
+                    <td>{f.observed}</td>
+                    <td>{f.expected}</td>
+                    <td>{f.residual}</td>
+                  </tr>
+                ))}
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left">Total</td>
+                  <td>{data.total_n}</td>
+                  <td>-</td>
+                  <td>-</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="spss-pivot-table-wrapper" style={{ maxWidth: 360 }}>
+            <div className="spss-pivot-title">Test Statistics</div>
+            <table className="spss-pivot-table">
+              <tbody>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>Chi-Square</td>
+                  <td>{data.test_statistics?.chi_square}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>df</td>
+                  <td>{data.test_statistics?.df}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>Asymp. Sig.</td>
+                  <td style={{ color: data.test_statistics?.asymp_sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: 600 }}>
+                    {data.test_statistics?.asymp_sig < 0.001 ? '< .001' : data.test_statistics?.asymp_sig}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // 14. BINOMIAL TEST
+    if (type === 'binomial_test') {
+      return (
+        <div className="spss-pivot-table-wrapper">
+          <div className="spss-pivot-title">Binomial Test: {data.variable}</div>
+          <table className="spss-pivot-table">
+            <thead>
+              <tr>
+                <th className="align-left">Category</th>
+                <th>N</th>
+                <th>Observed Prop.</th>
+                <th>Test Prop.</th>
+                <th>Exact Sig. (2-tailed)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.groups?.map((g: any, i: number) => (
+                <tr key={i}>
+                  <td className="align-left">{g.category} (Group {g.group})</td>
+                  <td>{g.n}</td>
+                  <td>{g.observed_prop}</td>
+                  <td>{g.test_prop !== null ? g.test_prop : ''}</td>
+                  {i === 0 && <td rowSpan={2} style={{ verticalAlign: 'middle', fontWeight: 600 }}>{data.exact_sig_2tailed}</td>}
+                </tr>
+              ))}
+              <tr className="spss-pivot-total-row">
+                <td className="align-left">Total</td>
+                <td>{data.total_n}</td>
+                <td>1.00</td>
+                <td>-</td>
+                <td>-</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // 15. RUNS TEST
+    if (type === 'runs_test') {
+      return (
+        <div className="spss-pivot-table-wrapper" style={{ maxWidth: 420 }}>
+          <div className="spss-pivot-title">Runs Test: {data.variable}</div>
+          <table className="spss-pivot-table">
+            <tbody>
+              <tr>
+                <td className="align-left" style={{ fontWeight: 600 }}>Test Value (Cut Point)</td>
+                <td>{data.test_value}</td>
+              </tr>
+              <tr>
+                <td className="align-left">Cases &lt; Test Value</td>
+                <td>{data.cases_less}</td>
+              </tr>
+              <tr>
+                <td className="align-left">Cases &gt;= Test Value</td>
+                <td>{data.cases_greater_equal}</td>
+              </tr>
+              <tr className="spss-pivot-total-row">
+                <td className="align-left">Total Cases</td>
+                <td>{data.total_cases}</td>
+              </tr>
+              <tr>
+                <td className="align-left">Number of Runs</td>
+                <td>{data.number_of_runs}</td>
+              </tr>
+              <tr>
+                <td className="align-left">Z</td>
+                <td>{data.z}</td>
+              </tr>
+              <tr>
+                <td className="align-left" style={{ fontWeight: 600 }}>Asymp. Sig. (2-tailed)</td>
+                <td style={{ color: data.asymp_sig_2tailed < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: 600 }}>
+                  {data.asymp_sig_2tailed < 0.001 ? '< .001' : data.asymp_sig_2tailed}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    // Generic Fallback Table for custom output data
+    if (data && typeof data === 'object') {
+      const entries = Object.entries(data).filter(([k]) => k !== 'title');
+      if (entries.length > 0) {
+        return (
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">{data.title || item.title}</div>
+            <table className="spss-pivot-table">
+              <tbody>
+                {entries.map(([k, v], i) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{k.replace(/_/g, ' ')}</td>
+                    <td>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
     }
 
     return null;
@@ -1531,6 +1876,9 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button className="spss-btn" onClick={() => onExport('pdf')} title="Export Full Report as PDF">
               <Download size={13} /> Export PDF
+            </button>
+            <button className="spss-btn" onClick={() => onExport('word')} title="Export Report as Microsoft Word (.doc)">
+              <FileText size={13} /> Export Word
             </button>
             <button className="spss-btn" onClick={() => onExport('xlsx')} title="Export Data & Tables as Excel">
               <FileSpreadsheet size={13} /> Export Excel

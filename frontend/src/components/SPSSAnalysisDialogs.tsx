@@ -20,12 +20,22 @@ import {
   clientComputeExplore,
   clientComputeFactorAnalysis,
   clientComputeLogisticRegression,
+  clientComputeMeansReport,
+  clientComputePartialCorrelation,
+  clientComputeCurveEstimation,
+  clientComputeChiSquareGoodness,
+  clientComputeBinomialTest,
+  clientComputeRunsTest,
 } from '../utils/clientStats';
 
 interface SPSSAnalysisDialogsProps {
   modalType: AnalysisModalType;
   variables: VariableMeta[];
   rows: Record<string, any>[];
+  splitByVariable?: string | null;
+  weightByVariable?: string | null;
+  onSetSplitByVariable?: (varName: string | null) => void;
+  onSetWeightByVariable?: (varName: string | null) => void;
   onClose: () => void;
   onAnalysisComplete: (output: OutputItem) => void;
   onPasteSyntax: (syntax: string) => void;
@@ -36,6 +46,10 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   modalType,
   variables,
   rows,
+  splitByVariable,
+  weightByVariable,
+  onSetSplitByVariable,
+  onSetWeightByVariable,
   onClose,
   onAnalysisComplete,
   onPasteSyntax,
@@ -62,7 +76,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   const [computeExpression, setComputeExpression] = useState<string>('');
 
   // Chart builder state
-  const [chartType, setChartType] = useState<'bar' | 'pie' | 'histogram' | 'scatter' | 'line'>('bar');
+  const [chartType, setChartType] = useState<'bar' | 'pie' | 'histogram' | 'scatter' | 'line' | 'boxplot'>('bar');
   const [chartXVar, setChartXVar] = useState<string>('');
   const [chartYVar, setChartYVar] = useState<string>('');
   const [chartTitle, setChartTitle] = useState<string>('');
@@ -70,8 +84,17 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   // Data management state
   const [sortOrder, setSortOrder] = useState<'A' | 'D'>('A');
   const [filterCondition, setFilterCondition] = useState<string>('salary > 30000');
-  const [splitVar, setSplitVar] = useState<string>('');
-  const [weightVar, setWeightVar] = useState<string>('');
+  const [splitVar, setSplitVar] = useState<string>(splitByVariable || '');
+  const [splitMode, setSplitMode] = useState<'off' | 'layered'>(splitByVariable ? 'layered' : 'off');
+  const [weightVar, setWeightVar] = useState<string>(weightByVariable || '');
+  const [weightMode, setWeightMode] = useState<'off' | 'weighted'>(weightByVariable ? 'weighted' : 'off');
+
+  // Advanced analysis options
+  const [controlVar, setControlVar] = useState<string>('');
+  const [indepVar, setIndepVar] = useState<string>('');
+  const [testProp, setTestProp] = useState<number>(0.5);
+  const [cutPointType, setCutPointType] = useState<'median' | 'mean' | 'custom'>('median');
+  const [customCut, setCustomCut] = useState<number>(0);
 
   // Nested Sub-Dialog state
   const [activeSubDialog, setActiveSubDialog] = useState<
@@ -197,18 +220,18 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
         if (vars.length === 0) throw new Error('Please select at least one variable for Frequencies.');
         output = await statsApiService.runFrequencies(rows, vars);
-        if (!output) output = clientComputeFrequencies(rows, vars);
+        if (!output) output = clientComputeFrequencies(rows, vars, {}, weightByVariable);
       } else if (modalType === 'descriptives') {
         const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name);
         if (vars.length === 0) throw new Error('Please select at least one numeric variable for Descriptives.');
         output = await statsApiService.runDescriptives(rows, vars);
-        if (!output) output = clientComputeDescriptives(rows, vars);
+        if (!output) output = clientComputeDescriptives(rows, vars, weightByVariable);
       } else if (modalType === 'crosstabs') {
         const r = rowVar || targetVars[0];
         const c = colVar || targetVars[1];
         if (!r || !c) throw new Error('Please select both a Row variable and a Column variable for Crosstabs.');
         output = await statsApiService.runCrosstabs(rows, r, c);
-        if (!output) output = clientComputeCrosstabs(rows, r, c);
+        if (!output) output = clientComputeCrosstabs(rows, r, c, weightByVariable);
       } else if (modalType === 'correlations') {
         const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
         if (vars.length < 2) throw new Error('Please select at least two numeric variables for Bivariate Correlations.');
@@ -379,33 +402,66 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
           },
         };
       } else if (modalType === 'split_file') {
-        const sVar = splitVar || selectedSourceVar || targetVars[0] || variables[0]?.name;
+        const sVar = splitMode === 'off' ? null : (splitVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
+        if (onSetSplitByVariable) {
+          onSetSplitByVariable(sVar);
+        }
         output = {
           id: `dm_${Date.now()}`,
           timestamp: new Date().toLocaleTimeString(),
           title: 'Split File',
           type: 'data_management',
-          syntax: `SORT CASES BY ${sVar}.\nSPLIT FILE LAYERED BY ${sVar}.`,
+          syntax: sVar ? `SORT CASES BY ${sVar}.\nSPLIT FILE LAYERED BY ${sVar}.` : 'SPLIT FILE OFF.',
           data: {
             'Operation': 'SPLIT FILE',
-            'Layer Variable': sVar,
-            'Status': 'Output will be grouped by split categories',
+            'Layer Variable': sVar || 'None (Split File Off)',
+            'Status': sVar ? `Active Split by ${sVar}` : 'Split File disabled (All cases analyzed together)',
           },
         };
       } else if (modalType === 'weight_cases') {
-        const wVar = weightVar || selectedSourceVar || targetVars[0] || variables[0]?.name;
+        const wVar = weightMode === 'off' ? null : (weightVar || selectedSourceVar || targetVars[0] || variables[0]?.name);
+        if (onSetWeightByVariable) {
+          onSetWeightByVariable(wVar);
+        }
         output = {
           id: `dm_${Date.now()}`,
           timestamp: new Date().toLocaleTimeString(),
           title: 'Weight Cases',
           type: 'data_management',
-          syntax: `WEIGHT BY ${wVar}.`,
+          syntax: wVar ? `WEIGHT BY ${wVar}.` : 'WEIGHT OFF.',
           data: {
             'Operation': 'WEIGHT CASES',
-            'Frequency Variable': wVar,
-            'Status': 'Active case weights applied',
+            'Frequency Variable': wVar || 'None (Weight Cases Off)',
+            'Status': wVar ? `Active case weights by ${wVar}` : 'Weighting disabled',
           },
         };
+      } else if (modalType === 'means_report') {
+        const deps = targetVars.length > 0 ? targetVars : [variables[0]?.name];
+        const f = factorVar || variables[1]?.name;
+        if (!f) throw new Error('Please select a Factor (Grouping) Variable for Means Report.');
+        output = clientComputeMeansReport(rows, deps, f, weightByVariable);
+      } else if (modalType === 'partial_correlation') {
+        const vars = targetVars.length >= 2 ? targetVars : [variables[0]?.name, variables[1]?.name];
+        const c = controlVar || variables[2]?.name;
+        if (!c) throw new Error('Please select at least one Control Variable.');
+        output = clientComputePartialCorrelation(rows, vars, [c]);
+      } else if (modalType === 'curve_estimation') {
+        const d = depVar || targetVars[0] || variables[0]?.name;
+        const iv = indepVar || targetVars[1] || variables[1]?.name;
+        if (!d || !iv) throw new Error('Please select both Dependent and Independent variables.');
+        output = clientComputeCurveEstimation(rows, d, iv);
+      } else if (modalType === 'chi_square_goodness') {
+        const v = depVar || targetVars[0] || variables[0]?.name;
+        if (!v) throw new Error('Please select a Test Variable.');
+        output = clientComputeChiSquareGoodness(rows, v);
+      } else if (modalType === 'binomial_test') {
+        const v = depVar || targetVars[0] || variables[0]?.name;
+        if (!v) throw new Error('Please select a Test Variable.');
+        output = clientComputeBinomialTest(rows, v, testProp);
+      } else if (modalType === 'runs_test') {
+        const v = depVar || targetVars[0] || variables[0]?.name;
+        if (!v) throw new Error('Please select a Test Variable.');
+        output = clientComputeRunsTest(rows, v, cutPointType, customCut);
       } else if (modalType === 'chart_builder') {
         const x = chartXVar || targetVars[0] || variables[0]?.name;
         const y = chartYVar || targetVars[1];
@@ -477,9 +533,21 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     } else if (modalType === 'select_cases') {
       syntax = `USE ALL.\nCOMPUTE filter_$ = (${filterCondition}).\nFILTER BY filter_$.\nEXECUTE.`;
     } else if (modalType === 'split_file') {
-      syntax = `SORT CASES BY ${splitVar || variables[0]?.name}.\nSPLIT FILE LAYERED BY ${splitVar || variables[0]?.name}.`;
+      syntax = splitVar ? `SORT CASES BY ${splitVar}.\nSPLIT FILE LAYERED BY ${splitVar}.` : 'SPLIT FILE OFF.';
     } else if (modalType === 'weight_cases') {
-      syntax = `WEIGHT BY ${weightVar || variables[0]?.name}.`;
+      syntax = weightVar ? `WEIGHT BY ${weightVar}.` : 'WEIGHT OFF.';
+    } else if (modalType === 'means_report') {
+      syntax = `MEANS TABLES=${targetVars.join(' ')} BY ${factorVar || 'jobcat'}\n  /CELLS=MEAN COUNT STDDEV MEDIAN MIN MAX SEMEAN.`;
+    } else if (modalType === 'partial_correlation') {
+      syntax = `PRCORR\n  /VARIABLES=${targetVars.join(' ')} WITH ${controlVar || 'educ'}\n  /SIGNIFICANCE=TWOTAIL.`;
+    } else if (modalType === 'curve_estimation') {
+      syntax = `CURVEFIT\n  /VARIABLES=${depVar || 'salary'} WITH ${indepVar || 'salbegin'}\n  /MODEL=LINEAR LOGARITHMIC QUADRATIC EXPONENTIAL.`;
+    } else if (modalType === 'chi_square_goodness') {
+      syntax = `NPAR TESTS\n  /CHISQUARE=${depVar || targetVars[0] || 'jobcat'}\n  /EXPECTED=EQUAL.`;
+    } else if (modalType === 'binomial_test') {
+      syntax = `NPAR TESTS\n  /BINOMIAL(${testProp})=${depVar || targetVars[0] || 'gender'}.`;
+    } else if (modalType === 'runs_test') {
+      syntax = `NPAR TESTS\n  /RUNS(${cutPointType.toUpperCase()})=${depVar || targetVars[0] || 'salary'}.`;
     }
 
     onPasteSyntax(syntax);
@@ -492,6 +560,12 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     explore: 'Explore (Normality Tests & Outliers)',
     crosstabs: 'Crosstabs',
     correlations: 'Bivariate Correlations',
+    means_report: 'Means Report',
+    partial_correlation: 'Partial Correlations',
+    curve_estimation: 'Curve Estimation',
+    chi_square_goodness: 'Chi-Square Test (Goodness of Fit)',
+    binomial_test: 'Binomial Test',
+    runs_test: 'Runs Test',
     one_sample_t_test: 'One-Sample T Test',
     independent_t_test: 'Independent-Samples T Test',
     paired_t_test: 'Paired-Samples T Test',
@@ -966,36 +1040,286 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   Unselected cases will be filtered or marked for analysis exclusion.
                 </span>
               </div>
-            ) : modalType === 'split_file' ? (
+            ) : modalType === 'means_report' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <span className="spss-picker-label">Groups Based On:</span>
-                <select
-                  className="spss-text-input"
-                  value={splitVar}
-                  onChange={(e) => setSplitVar(e.target.value)}
-                >
-                  <option value="">-- Select Split Variable --</option>
-                  {variables.map((v) => (
-                    <option key={v.name} value={v.name}>{v.name}</option>
-                  ))}
-                </select>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Compares groups or organizes output by selected grouping variable.
-                </span>
+                <div>
+                  <span className="spss-picker-label">Dependent List:</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.map((tv) => (
+                      <div
+                        key={tv}
+                        className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                        onClick={() => setSelectedTargetVar(tv)}
+                        onDoubleClick={handleMoveToSource}
+                      >
+                        {tv}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Layer 1 of 1 (Factor / Grouping Variable):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- Select Factor Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || v.type})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : modalType === 'partial_correlation' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Variables (at least 2):</span>
+                  <div className="spss-var-listbox" style={{ height: 110 }}>
+                    {targetVars.map((tv) => (
+                      <div
+                        key={tv}
+                        className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                        onClick={() => setSelectedTargetVar(tv)}
+                        onDoubleClick={handleMoveToSource}
+                      >
+                        {tv}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Controlling for:</span>
+                  <select
+                    className="spss-text-input"
+                    value={controlVar}
+                    onChange={(e) => setControlVar(e.target.value)}
+                  >
+                    <option value="">-- Select Control Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : modalType === 'curve_estimation' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Dependent (Y):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Dependent Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Independent (X):</span>
+                  <select
+                    className="spss-text-input"
+                    value={indepVar}
+                    onChange={(e) => setIndepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Independent Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Models fitted: Linear, Logarithmic, Quadratic, and Exponential.
+                </div>
+              </div>
+            ) : modalType === 'chi_square_goodness' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Test Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar || targetVars[0] || ''}
+                    onChange={(e) => {
+                      setDepVar(e.target.value);
+                      setTargetVars([e.target.value]);
+                    }}
+                  >
+                    <option value="">-- Select Test Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <fieldset style={{ border: '1px solid var(--border-app)', borderRadius: 4, padding: '8px 12px' }}>
+                  <legend style={{ fontSize: 11, fontWeight: 600, padding: '0 4px' }}>Expected Values</legend>
+                  <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input type="radio" checked readOnly /> All categories equal
+                  </label>
+                </fieldset>
+              </div>
+            ) : modalType === 'binomial_test' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Test Variable (Dichotomous):</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar || targetVars[0] || ''}
+                    onChange={(e) => {
+                      setDepVar(e.target.value);
+                      setTargetVars([e.target.value]);
+                    }}
+                  >
+                    <option value="">-- Select Test Variable --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Test Proportion:</span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.01"
+                    max="0.99"
+                    className="spss-text-input"
+                    style={{ width: 90 }}
+                    value={testProp}
+                    onChange={(e) => setTestProp(parseFloat(e.target.value) || 0.5)}
+                  />
+                </div>
+              </div>
+            ) : modalType === 'runs_test' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Test Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar || targetVars[0] || ''}
+                    onChange={(e) => {
+                      setDepVar(e.target.value);
+                      setTargetVars([e.target.value]);
+                    }}
+                  >
+                    <option value="">-- Select Test Variable --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <fieldset style={{ border: '1px solid var(--border-app)', borderRadius: 4, padding: '8px 12px' }}>
+                  <legend style={{ fontSize: 11, fontWeight: 600, padding: '0 4px' }}>Cut Point</legend>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="radio"
+                        name="runsCut"
+                        checked={cutPointType === 'median'}
+                        onChange={() => setCutPointType('median')}
+                      /> Median
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="radio"
+                        name="runsCut"
+                        checked={cutPointType === 'mean'}
+                        onChange={() => setCutPointType('mean')}
+                      /> Mean
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input
+                        type="radio"
+                        name="runsCut"
+                        checked={cutPointType === 'custom'}
+                        onChange={() => setCutPointType('custom')}
+                      /> Custom:
+                      <input
+                        type="number"
+                        className="spss-text-input"
+                        style={{ width: 70, marginLeft: 6 }}
+                        value={customCut}
+                        onChange={(e) => setCustomCut(parseFloat(e.target.value) || 0)}
+                        disabled={cutPointType !== 'custom'}
+                      />
+                    </label>
+                  </div>
+                </fieldset>
+              </div>
+            ) : modalType === 'split_file' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="splitRadio"
+                    checked={splitMode === 'off'}
+                    onChange={() => setSplitMode('off')}
+                  />
+                  Analyze all cases, do not create groups (Split File off)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="splitRadio"
+                    checked={splitMode === 'layered'}
+                    onChange={() => setSplitMode('layered')}
+                  />
+                  Compare groups / Organize output by groups
+                </label>
+
+                {splitMode === 'layered' && (
+                  <div style={{ paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span className="spss-picker-label">Groups Based On:</span>
+                    <select
+                      className="spss-text-input"
+                      value={splitVar}
+                      onChange={(e) => setSplitVar(e.target.value)}
+                    >
+                      <option value="">-- Select Split Variable --</option>
+                      {variables.map((v) => (
+                        <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             ) : modalType === 'weight_cases' ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <span className="spss-picker-label">Frequency Variable:</span>
-                <select
-                  className="spss-text-input"
-                  value={weightVar}
-                  onChange={(e) => setWeightVar(e.target.value)}
-                >
-                  <option value="">-- Select Frequency Weight Variable --</option>
-                  {variables.map((v) => (
-                    <option key={v.name} value={v.name}>{v.name}</option>
-                  ))}
-                </select>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="weightRadio"
+                    checked={weightMode === 'off'}
+                    onChange={() => setWeightMode('off')}
+                  />
+                  Do not weight cases (Weight off)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="weightRadio"
+                    checked={weightMode === 'weighted'}
+                    onChange={() => setWeightMode('weighted')}
+                  />
+                  Weight cases by:
+                </label>
+
+                {weightMode === 'weighted' && (
+                  <div style={{ paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span className="spss-picker-label">Frequency Variable:</span>
+                    <select
+                      className="spss-text-input"
+                      value={weightVar}
+                      onChange={(e) => setWeightVar(e.target.value)}
+                    >
+                      <option value="">-- Select Frequency Weight Variable --</option>
+                      {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                        <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             ) : modalType === 'chart_builder' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1011,6 +1335,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                     <option value="histogram">Histogram</option>
                     <option value="scatter">Scatter Plot</option>
                     <option value="line">Line Chart</option>
+                    <option value="boxplot">Boxplot (Box and Whisker)</option>
                   </select>
                 </div>
                 <div>
@@ -1089,7 +1414,16 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                 setTargetVars([]);
                 setSelectedSourceVar(null);
                 setSelectedTargetVar(null);
+                setRowVar('');
+                setColVar('');
+                setDepVar('');
+                setFactorVar('');
+                setFactorVarB('');
+                setGroupVar('');
+                setControlVar('');
+                setIndepVar('');
               }}
+              title="Reset dialog state"
             >
               Reset
             </button>
@@ -1098,7 +1432,31 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
             </button>
             <button
               className="spss-btn"
-              onClick={() => alert('SPSS Command Help: Refer to IBM SPSS Statistics 29.0 Core System User\'s Guide.')}
+              onClick={() => {
+                const helpMap: Record<string, string> = {
+                  frequencies: 'Frequencies: Counts occurrences and computes percentages, valid percent, and cumulative percent for discrete or categorical variables.',
+                  descriptives: 'Descriptives: Computes univariate summary statistics (Mean, Std Dev, Min, Max, Variance, S.E. Mean, Skewness, Kurtosis) for numeric scale variables.',
+                  crosstabs: 'Crosstabs: Cross-tabulates two categorical variables and calculates Pearson Chi-Square tests of independence and cell percentages.',
+                  correlations: 'Bivariate Correlations: Computes Pearson r correlation matrix with two-tailed significance test between two or more scale variables.',
+                  one_sample_t_test: 'One-Sample T-Test: Tests whether the sample mean of a scale variable differs significantly from a specified hypothesized test value.',
+                  independent_t_test: 'Independent-Samples T-Test: Compares the means of two independent groups using Student\'s t and Levene\'s Test for Equality of Variances.',
+                  paired_t_test: 'Paired-Samples T-Test: Compares means of two related measures on the same subjects (e.g., Pre-test vs Post-test).',
+                  one_way_anova: 'One-Way ANOVA: Tests whether the means of several groups differ significantly using the F-test, with optional Tukey Post-Hoc comparisons.',
+                  two_way_anova: 'Two-Way ANOVA: Analyzes the effects of two categorical factors and their interaction on a continuous dependent variable.',
+                  linear_regression: 'Linear Regression: Estimates coefficients of a linear model predicting a dependent variable from one or more independent variables.',
+                  reliability: 'Reliability Analysis: Evaluates internal consistency of multi-item questionnaires using Cronbach\'s Alpha.',
+                  means_report: 'Means Report: Calculates detailed descriptive statistics (Mean, N, Std Dev, Median, Min, Max) for dependent variables broken down by grouping factors.',
+                  partial_correlation: 'Partial Correlation: Measures linear relationship between two variables while controlling for the effects of one or more additional variables.',
+                  curve_estimation: 'Curve Estimation: Compares multiple regression curve models (Linear, Logarithmic, Quadratic, Exponential) to identify best fit.',
+                  chi_square_goodness: 'Chi-Square Goodness-of-Fit: Tests whether observed category frequencies match expected equal proportions.',
+                  binomial_test: 'Binomial Test: Tests whether observed proportions of a dichotomous variable differ significantly from an expected proportion (e.g. 0.50).',
+                  runs_test: 'Runs Test: Tests the hypothesis of randomness for a sequence of numeric data points relative to a specified cut point (median or mean).',
+                  split_file: 'Split File: Stratifies your dataset by a grouping variable so that subsequent statistical analyses are performed separately for each category.',
+                  weight_cases: 'Weight Cases: Gives cases different weights (by frequency or importance) for statistical calculations and frequency tables.',
+                  chart_builder: 'Chart Builder: Generates statistical visualizations (Bar, Pie, Histogram, Scatter, Line, Boxplot).',
+                };
+                alert(helpMap[modalType || ''] || 'Refer to IBM SPSS Statistics 29.0 Core System User\'s Guide.');
+              }}
             >
               Help
             </button>
