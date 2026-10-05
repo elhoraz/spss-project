@@ -19,7 +19,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend,
 interface OutputViewerProps {
   outputs: OutputItem[];
   onClearOutputs: () => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
 }
 
 export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onExport }) => {

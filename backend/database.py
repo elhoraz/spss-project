@@ -5,6 +5,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # Database URL from environment (PostgreSQL by default in production/docker)
 # Local fallback to SQLite if PostgreSQL is not available
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./spss_studio.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 # If using PostgreSQL in docker, URL format: postgresql://postgres:postgres@db:5432/spss_studio
 if DATABASE_URL.startswith("sqlite"):

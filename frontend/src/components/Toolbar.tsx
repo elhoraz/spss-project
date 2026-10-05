@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   FolderOpen,
   Save,
@@ -17,6 +16,7 @@ import {
   Database,
   BarChart2,
   Filter,
+  FilePlus,
 } from 'lucide-react';
 import { AnalysisModalType, ActiveView, AppTheme } from '../types/spss';
 
@@ -30,7 +30,8 @@ interface ToolbarProps {
   onToggleTheme: () => void;
   datasetName: string;
   onSelectSampleDataset: (name: string) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
+  onNewData: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -44,10 +45,20 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   datasetName,
   onSelectSampleDataset,
   onExport,
+  onNewData,
 }) => {
   return (
     <div className="spss-toolbar">
       <div className="spss-toolbar-group">
+        {/* New Data */}
+        <button
+          className="spss-toolbar-btn"
+          title="New Dataset Document (Ctrl+N)"
+          onClick={onNewData}
+        >
+          <FilePlus size={16} />
+        </button>
+
         {/* Open Data */}
         <button
           className="spss-toolbar-btn"

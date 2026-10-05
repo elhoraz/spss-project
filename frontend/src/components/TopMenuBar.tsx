@@ -14,14 +14,16 @@ import {
   Sliders,
   Layers,
   CheckSquare,
+  Server,
 } from 'lucide-react';
 import { AnalysisModalType, ActiveView } from '../types/spss';
 
 interface TopMenuBarProps {
   onOpenModal: (modal: AnalysisModalType) => void;
   onSetActiveView: (view: ActiveView) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => void;
   onResetData: () => void;
+  onNewData: () => void;
   onToggleValueLabels: () => void;
   showValueLabels: boolean;
 }
@@ -31,6 +33,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onSetActiveView,
   onExport,
   onResetData,
+  onNewData,
   onToggleValueLabels,
   showValueLabels,
 }) => {
@@ -69,6 +72,12 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
         </button>
         {openMenu === 'file' && (
           <div className="spss-dropdown">
+            <div className="spss-dropdown-item" onClick={() => handleAction(onNewData)}>
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> New Dataset (Blank Document)
+              </div>
+              <span className="spss-dropdown-shortcut">Ctrl+N</span>
+            </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('import_data'))}>
               <div className="spss-dropdown-item-left">
                 <FolderOpen size={14} /> Open Data (CSV, Excel, JSON)...
@@ -81,11 +90,16 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               </div>
             </div>
             <div className="spss-dropdown-divider" />
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('xlsx'))}>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('sav'))}>
               <div className="spss-dropdown-item-left">
-                <Save size={14} /> Save As Excel (.xlsx)...
+                <Save size={14} /> Save As SPSS Dataset (.sav.json)...
               </div>
               <span className="spss-dropdown-shortcut">Ctrl+S</span>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('xlsx'))}>
+              <div className="spss-dropdown-item-left">
+                <Save size={14} /> Export to Excel (.xlsx)...
+              </div>
             </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('csv'))}>
               <div className="spss-dropdown-item-left">
@@ -230,14 +244,14 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
         </button>
         {openMenu === 'transform' && (
           <div className="spss-dropdown">
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('descriptives'))}>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('compute_variable'))}>
               Compute Variable...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('frequencies'))}>
-              Recode into Same Variables...
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('sort_cases'))}>
+              Sort Cases...
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('frequencies'))}>
-              Recode into Different Variables...
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('select_cases'))}>
+              Select Cases (Filter)...
             </div>
           </div>
         )}
@@ -489,6 +503,12 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
         </button>
         {openMenu === 'help' && (
           <div className="spss-dropdown">
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('server_settings'))}>
+              <div className="spss-dropdown-item-left">
+                <Server size={14} /> Server & Cloud Backend Settings...
+              </div>
+            </div>
+            <div className="spss-dropdown-divider" />
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('about_spss'))}>
               <div className="spss-dropdown-item-left">
                 <HelpCircle size={14} /> About OpenSPSS Statistics Studio...

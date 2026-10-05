@@ -74,7 +74,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
   const setupPreview = (filename: string, rawRows: Record<string, any>[]) => {
     const keys = Object.keys(rawRows[0] || {});
-    const vars: VariableMeta[] = keys.map((k) => {
+    const keyMap: Record<string, string> = {};
+
+    const vars: VariableMeta[] = keys.map((k, kIdx) => {
       // Check if numeric
       const numericCount = rawRows.filter((r) => {
         const v = parseFloat(r[k]);
@@ -82,7 +84,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       }).length;
 
       const isNumeric = numericCount > rawRows.length * 0.5;
-      const cleanName = k.trim().replace(/\s+/g, '_');
+      const cleanName = k.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '') || `VAR0000${kIdx + 1}`.slice(-8);
+      keyMap[k] = cleanName;
 
       return {
         name: cleanName,
@@ -99,10 +102,24 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       };
     });
 
+    const normalizedRows = rawRows.map((r, idx) => {
+      const newRow: Record<string, any> = { id: idx + 1 };
+      for (const [origKey, cleanKey] of Object.entries(keyMap)) {
+        const val = r[origKey];
+        if (val !== undefined && val !== null && val !== '') {
+          const num = parseFloat(val);
+          newRow[cleanKey] = !isNaN(num) && isFinite(num) && typeof val !== 'boolean' ? num : val;
+        } else {
+          newRow[cleanKey] = null;
+        }
+      }
+      return newRow;
+    });
+
     setPreviewData({
       name: filename,
       vars,
-      rows: rawRows,
+      rows: normalizedRows,
     });
   };
 

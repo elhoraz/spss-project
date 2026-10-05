@@ -43,6 +43,8 @@ export type AnalysisType =
   | 'factor_analysis'
   | 'logistic_regression'
   | 'data_management'
+  | 'compute_variable'
+  | 'recode_variable'
   | 'chart'
   | 'log';
 
@@ -76,6 +78,8 @@ export type AnalysisModalType =
   | 'explore'
   | 'factor_analysis'
   | 'logistic_regression'
+  | 'compute_variable'
+  | 'recode_variable'
   | 'sort_cases'
   | 'select_cases'
   | 'split_file'
@@ -84,6 +88,7 @@ export type AnalysisModalType =
   | 'import_data'
   | 'export_report'
   | 'value_labels'
-  | 'about_spss';
+  | 'about_spss'
+  | 'server_settings';
 
 export type AppTheme = 'spss-classic' | 'modern-light' | 'academic-dark';

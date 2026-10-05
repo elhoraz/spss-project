@@ -3,6 +3,7 @@ import Editor, { OnMount } from '@monaco-editor/react';
 import { Play, RotateCcw, Download, Upload, Sparkles, CheckCircle2 } from 'lucide-react';
 import { OutputItem } from '../types/spss';
 import { clientRunSyntax } from '../utils/clientStats';
+import { statsApiService } from '../services/api';
 
 interface SyntaxEditorProps {
   syntaxCode: string;
@@ -186,15 +187,18 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
     }
   };
 
-  const handleRunAll = () => {
+  const handleRunAll = async () => {
     if (!syntaxCode.trim()) return;
-    const generated = clientRunSyntax(syntaxCode, rows);
-    if (generated.length > 0) {
+    let generated = await statsApiService.runSyntax(syntaxCode, rows);
+    if (!generated || generated.length === 0) {
+      generated = clientRunSyntax(syntaxCode, rows);
+    }
+    if (generated && generated.length > 0) {
       onOutputsGenerated(generated);
     }
   };
 
-  const handleRunSelection = () => {
+  const handleRunSelection = async () => {
     if (!editorRef.current) return;
     const selection = editorRef.current.getSelection();
     let codeToRun = '';
@@ -213,8 +217,11 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
       return;
     }
 
-    const generated = clientRunSyntax(codeToRun, rows);
-    if (generated.length > 0) {
+    let generated = await statsApiService.runSyntax(codeToRun, rows);
+    if (!generated || generated.length === 0) {
+      generated = clientRunSyntax(codeToRun, rows);
+    }
+    if (generated && generated.length > 0) {
       onOutputsGenerated(generated);
     }
   };

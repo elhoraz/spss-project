@@ -23,6 +23,7 @@ interface DataViewGridProps {
   rows: Record<string, any>[];
   showValueLabels: boolean;
   onCellChange: (rowIndex: number, varName: string, value: any) => void;
+  onBulkPaste?: (startRow: number, startCol: number, matrix: string[][]) => void;
   onAddRow: () => void;
   onAddVariable: () => void;
   onInsertRow?: (beforeIndex: number) => void;
@@ -38,6 +39,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   rows,
   showValueLabels,
   onCellChange,
+  onBulkPaste,
   onAddRow,
   onAddVariable,
   onInsertRow,
@@ -62,9 +64,12 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Guarantee at least 50 visible rows for data entry (authentic SPSS behavior)
+  const displayRowCount = Math.max(50, rows.length);
+
   // Virtualizer for smooth rendering with 100,000+ rows
   const rowVirtualizer = useVirtualizer({
-    count: rows.length,
+    count: displayRowCount,
     getScrollElement: () => containerRef.current,
     estimateSize: () => 24,
     overscan: 30,
@@ -85,10 +90,10 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   // Keep selected row in view when navigating
   useEffect(() => {
-    if (!editingCell && selectedCell.row >= 0 && selectedCell.row < rows.length) {
+    if (!editingCell && selectedCell.row >= 0 && selectedCell.row < displayRowCount) {
       rowVirtualizer.scrollToIndex(selectedCell.row, { align: 'auto' });
     }
-  }, [selectedCell.row, rows.length]);
+  }, [selectedCell.row, displayRowCount]);
 
   const isMouseDownRef = useRef<boolean>(false);
 
@@ -164,20 +169,32 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   };
 
   // Edit lifecycle
-  const startEditing = (rIdx: number, cIdx: number) => {
-    if (cIdx >= variables.length || rIdx >= rows.length) return;
+  const startEditing = (rIdx: number, cIdx: number, initialChar?: string) => {
+    if (variables.length === 0) {
+      onAddVariable();
+      setEditingCell({ row: rIdx, col: 0 });
+      setEditValue(initialChar ?? '');
+      return;
+    }
+    if (cIdx >= variables.length) return;
     const varName = variables[cIdx].name;
-    const val = rows[rIdx][varName];
+    const val = rows[rIdx]?.[varName];
     setEditingCell({ row: rIdx, col: cIdx });
-    setEditValue(val !== undefined && val !== null ? String(val) : '');
+    setEditValue(initialChar !== undefined ? initialChar : val !== undefined && val !== null ? String(val) : '');
   };
 
   const commitEdit = () => {
     if (!editingCell) return;
     const varMeta = variables[editingCell.col];
-    let parsedVal: any = editValue.trim();
+    if (!varMeta) {
+      setEditingCell(null);
+      return;
+    }
 
-    if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
+    let parsedVal: any = editValue.trim();
+    if (parsedVal === '') {
+      parsedVal = null;
+    } else if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
       const num = parseFloat(parsedVal.replace(/[$,]/g, ''));
       parsedVal = isNaN(num) ? parsedVal : num;
     }
@@ -214,10 +231,13 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   const handlePaste = () => {
     navigator.clipboard.readText().then((text) => {
       if (!text) return;
-      const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
-      lines.forEach((line, rOffset) => {
-        const rIdx = selectedCell.row + rOffset;
-        if (rIdx < rows.length) {
+      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const matrix = lines.map((l) => l.split('\t'));
+      if (onBulkPaste) {
+        onBulkPaste(selectedCell.row, selectedCell.col, matrix);
+      } else {
+        lines.forEach((line, rOffset) => {
+          const rIdx = selectedCell.row + rOffset;
           const cells = line.split('\t');
           cells.forEach((cellVal, cOffset) => {
             const cIdx = selectedCell.col + cOffset;
@@ -231,8 +251,8 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               onCellChange(rIdx, varMeta.name, parsed);
             }
           });
-        }
-      });
+        });
+      }
     });
   };
 
@@ -261,10 +281,9 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingCell) {
         if (e.key === 'Enter') {
+          const nextRow = selectedCell.row + 1;
           commitEdit();
-          if (selectedCell.row < rows.length - 1) {
-            selectSingleCell(selectedCell.row + 1, selectedCell.col);
-          }
+          selectSingleCell(nextRow, selectedCell.col);
         } else if (e.key === 'Escape') {
           setEditingCell(null);
         } else if (e.key === 'Tab') {
@@ -272,9 +291,20 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
           commitEdit();
           if (selectedCell.col < variables.length - 1) {
             selectSingleCell(selectedCell.row, selectedCell.col + 1);
+          } else {
+            selectSingleCell(selectedCell.row + 1, 0);
           }
         }
         return;
+      }
+
+      // Direct typing of alphanumeric character starts editing immediately (Excel / SPSS standard)
+      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && /[a-zA-Z0-9\.\-\_\,\$\#]/.test(e.key)) {
+        if (selectedCell.row >= 0 && selectedCell.col >= 0) {
+          e.preventDefault();
+          startEditing(selectedCell.row, selectedCell.col, e.key);
+          return;
+        }
       }
 
       // F2 to start editing
@@ -311,9 +341,9 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
       // Fill Down (Ctrl+D)
       if (e.ctrlKey && e.key === 'd') {
         e.preventDefault();
-        if (selectedCell.row < rows.length - 1 && variables[selectedCell.col]) {
+        if (variables[selectedCell.col]) {
           const varName = variables[selectedCell.col].name;
-          const currentVal = rows[selectedCell.row][varName];
+          const currentVal = rows[selectedCell.row]?.[varName];
           onCellChange(selectedCell.row + 1, varName, currentVal);
           selectSingleCell(selectedCell.row + 1, selectedCell.col);
         }
@@ -326,22 +356,29 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         selectSingleCell(Math.max(0, selectedCell.row - 1), selectedCell.col);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        selectSingleCell(Math.min(rows.length - 1, selectedCell.row + 1), selectedCell.col);
+        selectSingleCell(Math.min(displayRowCount - 1, selectedCell.row + 1), selectedCell.col);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         selectSingleCell(selectedCell.row, Math.max(0, selectedCell.col - 1));
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
-        selectSingleCell(selectedCell.row, Math.min(variables.length - 1, selectedCell.col + 1));
+        selectSingleCell(selectedCell.row, Math.min(Math.max(0, variables.length - 1), selectedCell.col + 1));
       } else if (e.key === 'Enter') {
         e.preventDefault();
         startEditing(selectedCell.row, selectedCell.col);
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        if (selectedCell.col < variables.length - 1) {
+          selectSingleCell(selectedCell.row, selectedCell.col + 1);
+        } else {
+          selectSingleCell(selectedCell.row + 1, 0);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingCell, selectedCell, selectionRange, variables, rows, editValue]);
+  }, [editingCell, selectedCell, selectionRange, variables, rows, editValue, displayRowCount]);
 
   // Helper to format cell display
   const formatCellValue = (val: any, varMeta: VariableMeta) => {
@@ -487,8 +524,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
             {/* Virtualized Rows */}
             {virtualRows.map((virtualRow) => {
               const rIdx = virtualRow.index;
-              const row = rows[rIdx];
-              if (!row) return null;
+              const row = rows[rIdx] || {};
 
               const isRowSelected = selectionType === 'row' && selectedCell.row === rIdx;
               const isFiltered = isRowFiltered(row);

@@ -10,9 +10,11 @@ import { SPSSAnalysisDialogs } from './components/SPSSAnalysisDialogs';
 import { ValueLabelsModal } from './components/ValueLabelsModal';
 import { ImportExportModal } from './components/ImportExportModal';
 import { AboutModal } from './components/AboutModal';
+import { ServerSettingsModal } from './components/ServerSettingsModal';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
+import { statsApiService } from './services/api';
 
 export const App: React.FC = () => {
   // Application State
@@ -37,6 +39,25 @@ export const App: React.FC = () => {
     const initDesc = clientComputeDescriptives(employeeDataset.rows, ['salary', 'salbegin', 'educ']);
     return [initFreq, initDesc];
   });
+
+  // Backend server connection state
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    statsApiService.checkHealth().then((online) => {
+      if (mounted) setIsBackendOnline(online);
+    });
+    const interval = setInterval(() => {
+      statsApiService.checkHealth().then((online) => {
+        if (mounted) setIsBackendOnline(online);
+      });
+    }, 25000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   // Apply theme to root html element
   useEffect(() => {
@@ -94,11 +115,112 @@ export const App: React.FC = () => {
     setTheme((prev) => (prev === 'spss-classic' ? 'modern-light' : prev === 'modern-light' ? 'academic-dark' : 'spss-classic'));
   };
 
-  // Cell editing in Data View
+  // Cell editing in Data View (auto-expands rows and auto-creates variable if empty)
   const handleCellChange = (rowIndex: number, varName: string, value: any) => {
+    let currentVars = [...dataset.variables];
+    if (currentVars.length === 0) {
+      const newVar: VariableMeta = {
+        name: 'VAR00001',
+        type: 'Numeric',
+        width: 8,
+        decimals: 2,
+        label: '',
+        values: {},
+        missing: 'None',
+        columns: 8,
+        align: 'Right',
+        measure: 'Scale',
+        role: 'Input',
+      };
+      currentVars.push(newVar);
+      varName = 'VAR00001';
+    }
+
     const updatedRows = [...dataset.rows];
+    while (updatedRows.length <= rowIndex) {
+      const newRow: Record<string, any> = { id: updatedRows.length + 1 };
+      currentVars.forEach((v) => {
+        newRow[v.name] = null;
+      });
+      updatedRows.push(newRow);
+    }
     updatedRows[rowIndex] = { ...updatedRows[rowIndex], [varName]: value };
-    setDataset({ ...dataset, rows: updatedRows });
+    setDataset({ ...dataset, variables: currentVars, rows: updatedRows });
+  };
+
+  // High-performance bulk paste from Excel / Clipboard
+  const handleBulkPaste = (startRow: number, startCol: number, matrix: string[][]) => {
+    let currentVars = [...dataset.variables];
+    const maxColNeeded = startCol + Math.max(...matrix.map((r) => r.length), 1);
+
+    while (currentVars.length < maxColNeeded) {
+      const varNum = currentVars.length + 1;
+      const newVarName = `VAR0000${varNum}`.slice(-8);
+      currentVars.push({
+        name: newVarName,
+        type: 'Numeric',
+        width: 8,
+        decimals: 2,
+        label: '',
+        values: {},
+        missing: 'None',
+        columns: 8,
+        align: 'Right',
+        measure: 'Scale',
+        role: 'Input',
+      });
+    }
+
+    const updatedRows = [...dataset.rows];
+    const maxRowNeeded = startRow + matrix.length;
+    while (updatedRows.length < maxRowNeeded) {
+      const newRow: Record<string, any> = { id: updatedRows.length + 1 };
+      currentVars.forEach((v) => {
+        newRow[v.name] = null;
+      });
+      updatedRows.push(newRow);
+    }
+
+    matrix.forEach((rowVals, rOffset) => {
+      const rIdx = startRow + rOffset;
+      const rowObj = { ...updatedRows[rIdx] };
+      rowVals.forEach((valStr, cOffset) => {
+        const cIdx = startCol + cOffset;
+        const vMeta = currentVars[cIdx];
+        if (vMeta) {
+          const trimmed = valStr.trim();
+          if (trimmed === '') {
+            rowObj[vMeta.name] = null;
+          } else {
+            const num = parseFloat(trimmed.replace(/[$,]/g, ''));
+            rowObj[vMeta.name] = !isNaN(num) && isFinite(num) ? num : trimmed;
+          }
+        }
+      });
+      updatedRows[rIdx] = rowObj;
+    });
+
+    setDataset({
+      ...dataset,
+      variables: currentVars,
+      rows: updatedRows,
+    });
+  };
+
+  // Start a new blank dataset (File -> New -> Data)
+  const handleNewDataset = () => {
+    const defaultVars: VariableMeta[] = [
+      { name: 'VAR00001', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
+      { name: 'VAR00002', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
+      { name: 'VAR00003', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
+    ];
+    setDataset({
+      name: 'Untitled1.sav',
+      variables: defaultVars,
+      rows: [],
+    });
+    setOutputs([]);
+    setActiveView('data');
   };
 
   // Add row (case)
@@ -264,7 +386,7 @@ export const App: React.FC = () => {
   };
 
   // Export functions
-  const handleExport = (format: 'pdf' | 'xlsx' | 'csv') => {
+  const handleExport = (format: 'pdf' | 'xlsx' | 'csv' | 'sav') => {
     if (format === 'pdf') {
       setActiveView('output');
       setTimeout(() => window.print(), 200);
@@ -278,6 +400,19 @@ export const App: React.FC = () => {
       const wsVars = XLSX.utils.json_to_sheet(dataset.variables);
       XLSX.utils.book_append_sheet(wb, wsVars, 'Variable View');
       XLSX.writeFile(wb, `${dataset.name.replace('.sav', '')}_exported.xlsx`);
+      return;
+    }
+
+    if (format === 'sav') {
+      const jsonStr = JSON.stringify(dataset, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${dataset.name.replace('.sav', '')}.sav.json`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       return;
     }
 
@@ -307,7 +442,7 @@ export const App: React.FC = () => {
     setActiveView('syntax');
   };
 
-  const editingVariable = dataset.variables.find((v) => v.name === valueLabelsVarName);
+  const editingVariable = dataset.variables.find((v) => v.name === valueLabelsVarName) || dataset.variables[0];
 
   return (
     <div className="spss-app-container">
@@ -335,6 +470,7 @@ export const App: React.FC = () => {
         onSetActiveView={(v) => setActiveView(v)}
         onExport={handleExport}
         onResetData={() => handleSelectSampleDataset('Employee data.sav')}
+        onNewData={handleNewDataset}
         onToggleValueLabels={() => setShowValueLabels(!showValueLabels)}
         showValueLabels={showValueLabels}
       />
@@ -351,6 +487,7 @@ export const App: React.FC = () => {
         datasetName={dataset.name}
         onSelectSampleDataset={handleSelectSampleDataset}
         onExport={handleExport}
+        onNewData={handleNewDataset}
       />
 
       {/* 4. Main Workspace */}
@@ -362,6 +499,7 @@ export const App: React.FC = () => {
               rows={dataset.rows}
               showValueLabels={showValueLabels}
               onCellChange={handleCellChange}
+              onBulkPaste={handleBulkPaste}
               onAddRow={handleAddRow}
               onAddVariable={handleAddVariable}
               onInsertRow={handleInsertRow}
@@ -440,13 +578,41 @@ export const App: React.FC = () => {
 
         {/* 5. Bottom Status Bar */}
         <div className="spss-bottom-statusbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <span>IBM SPSS Statistics Processor is ready</span>
             <span>|</span>
             <span>Cases: {dataset.rows.length}</span>
             <span>Variables: {dataset.variables.length}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              onClick={() => setActiveModal('server_settings')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                cursor: 'pointer',
+                padding: '2px 8px',
+                borderRadius: 3,
+                background: isBackendOnline ? 'rgba(34, 197, 94, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                color: isBackendOnline ? 'var(--success)' : '#2563eb',
+                fontWeight: 600,
+                fontSize: 11,
+                border: `1px solid ${isBackendOnline ? 'rgba(34, 197, 94, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
+              }}
+              title="Click to configure backend server or Render cloud connection"
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  backgroundColor: isBackendOnline ? 'var(--success)' : '#3b82f6',
+                  display: 'inline-block',
+                }}
+              />
+              <span>{isBackendOnline ? 'Backend: Online (Render / Python)' : 'Engine: Client-Side (Dual-Mode)'}</span>
+            </div>
             <span>Filter off</span>
             <span>Weight off</span>
             <span>Split File off</span>
@@ -462,7 +628,33 @@ export const App: React.FC = () => {
         onClose={() => setActiveModal(null)}
         onAnalysisComplete={handleAnalysisComplete}
         onPasteSyntax={handlePasteSyntax}
-        onApplyDataOperation={(newRows) => setDataset((prev) => ({ ...prev, rows: newRows }))}
+        onApplyDataOperation={(newRows) => {
+          if (newRows.length > 0) {
+            const existingVarNames = new Set(dataset.variables.map((v) => v.name));
+            const rowKeys = Object.keys(newRows[0]);
+            const newVars = [...dataset.variables];
+            rowKeys.forEach((k) => {
+              if (k !== 'id' && !existingVarNames.has(k)) {
+                newVars.push({
+                  name: k,
+                  type: 'Numeric',
+                  width: 8,
+                  decimals: 2,
+                  label: k,
+                  values: {},
+                  missing: 'None',
+                  columns: 8,
+                  align: 'Right',
+                  measure: 'Scale',
+                  role: 'Input',
+                });
+              }
+            });
+            setDataset({ ...dataset, variables: newVars, rows: newRows });
+          } else {
+            setDataset((prev) => ({ ...prev, rows: newRows }));
+          }
+        }}
       />
 
       {activeModal === 'value_labels' && editingVariable && (
@@ -491,6 +683,12 @@ export const App: React.FC = () => {
       <AboutModal
         isOpen={activeModal === 'about_spss'}
         onClose={() => setActiveModal(null)}
+      />
+
+      <ServerSettingsModal
+        isOpen={activeModal === 'server_settings'}
+        onClose={() => setActiveModal(null)}
+        onStatusChange={(online) => setIsBackendOnline(online)}
       />
     </div>
   );
