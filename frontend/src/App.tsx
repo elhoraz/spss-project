@@ -16,6 +16,8 @@ import { FindReplaceDialog } from './components/FindReplaceDialog';
 import { RecodeModal } from './components/RecodeModal';
 import { AutomaticRecodeModal } from './components/AutomaticRecodeModal';
 import { ReplaceMissingModal } from './components/ReplaceMissingModal';
+import { AggregateModal } from './components/AggregateModal';
+import { MergeFilesModal } from './components/MergeFilesModal';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
@@ -1013,6 +1015,41 @@ export const App: React.FC = () => {
           setOutputs((prev) => [output, ...prev]);
           setActiveView('output');
         }}
+      />
+
+      {/* Aggregate Data Modal */}
+      <AggregateModal
+        isOpen={activeModal === 'aggregate_data'}
+        variables={dataset.variables}
+        rows={dataset.rows}
+        onClose={() => setActiveModal(null)}
+        onApplyNewDataset={(newDs, out) => {
+          pushHistory(dataset);
+          setDataset(newDs);
+          setOutputs((prev) => [out, ...prev]);
+          setActiveView('data');
+        }}
+        onApplyToCurrent={(newVars, newRows, out) => {
+          pushHistory(dataset);
+          setDataset({ ...dataset, variables: [...dataset.variables, ...newVars], rows: newRows });
+          setOutputs((prev) => [out, ...prev]);
+          setActiveView('output');
+        }}
+        onPasteSyntax={(syn) => handlePasteSyntax(syn)}
+      />
+
+      {/* Merge Files Modal */}
+      <MergeFilesModal
+        isOpen={activeModal === 'merge_files'}
+        currentDataset={dataset}
+        onClose={() => setActiveModal(null)}
+        onApplyMergedDataset={(mergedDs, out) => {
+          pushHistory(dataset);
+          setDataset(mergedDs);
+          setOutputs((prev) => [out, ...prev]);
+          setActiveView('data');
+        }}
+        onPasteSyntax={(syn) => handlePasteSyntax(syn)}
       />
     </div>
   );

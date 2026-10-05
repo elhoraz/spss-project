@@ -2330,3 +2330,482 @@ export function clientComputeRunsTest(
   };
 }
 
+// 20. ANCOVA (Analysis of Covariance)
+export function clientComputeANCOVA(
+  rows: Record<string, any>[],
+  dependentVar: string,
+  factorVar: string,
+  covariateVars: string[]
+): OutputItem {
+  // Extract complete valid cases
+  const validData = rows
+    .map((r, idx) => {
+      const y = parseFloat(r[dependentVar]);
+      const factor = r[factorVar] !== undefined && r[factorVar] !== null ? String(r[factorVar]).trim() : '';
+      const covs = covariateVars.map((c) => parseFloat(r[c]));
+      const allCovsValid = covs.every((v) => !isNaN(v) && isFinite(v));
+      return { id: idx, y, factor, covs, valid: !isNaN(y) && isFinite(y) && factor !== '' && allCovsValid };
+    })
+    .filter((d) => d.valid);
+
+  const n = validData.length;
+  if (n < 4) {
+    throw new Error('ANCOVA requires at least 4 complete valid observations.');
+  }
+
+  const factorLevels = Array.from(new Set(validData.map((d) => d.factor))).sort();
+  const k = factorLevels.length;
+  if (k < 2) {
+    throw new Error('ANCOVA requires at least 2 distinct levels in the factor variable.');
+  }
+
+  // Mean of Y and Covariates
+  const meanY = validData.reduce((acc, d) => acc + d.y, 0) / n;
+  const meanCovs = covariateVars.map((_, cIdx) => validData.reduce((acc, d) => acc + d.covs[cIdx], 0) / n);
+
+  // Total Corrected SS
+  const ssTotal = validData.reduce((acc, d) => acc + Math.pow(d.y - meanY, 2), 0);
+  const dfTotal = n - 1;
+
+  // Fit standard OLS with factor dummy indicators and covariates
+  // Group statistics
+  const groupStats = factorLevels.map((lvl) => {
+    const grpData = validData.filter((d) => d.factor === lvl);
+    const grpCount = grpData.length;
+    const rawMean = grpCount > 0 ? grpData.reduce((acc, d) => acc + d.y, 0) / grpCount : 0;
+    const stdDev =
+      grpCount > 1
+        ? Math.sqrt(grpData.reduce((acc, d) => acc + Math.pow(d.y - rawMean, 2), 0) / (grpCount - 1))
+        : 0;
+    return { level: lvl, n: grpCount, rawMean, stdDev };
+  });
+
+  // Calculate Covariate slopes (b_c) using simple/multiple regression on pooled residuals
+  let pooledNum = 0;
+  let pooledDen = 0;
+  factorLevels.forEach((lvl) => {
+    const grp = validData.filter((d) => d.factor === lvl);
+    if (grp.length > 1) {
+      const gMeanY = grp.reduce((acc, d) => acc + d.y, 0) / grp.length;
+      const gMeanX = grp.reduce((acc, d) => acc + d.covs[0], 0) / grp.length;
+      grp.forEach((d) => {
+        pooledNum += (d.covs[0] - gMeanX) * (d.y - gMeanY);
+        pooledDen += Math.pow(d.covs[0] - gMeanX, 2);
+      });
+    }
+  });
+  const bCov = pooledDen > 0 ? pooledNum / pooledDen : 0;
+
+  // SS Error
+  let ssError = 0;
+  validData.forEach((d) => {
+    const grpStat = groupStats.find((g) => g.level === d.factor);
+    const pred = (grpStat?.rawMean || meanY) + bCov * (d.covs[0] - meanCovs[0]);
+    ssError += Math.pow(d.y - pred, 2);
+  });
+  const p = covariateVars.length;
+  const dfError = Math.max(1, n - k - p);
+  const msError = ssError / dfError;
+
+  // SS Model & SS Factor
+  const ssModel = Math.max(0, ssTotal - ssError);
+  const dfModel = k - 1 + p;
+  const msModel = dfModel > 0 ? ssModel / dfModel : 0;
+  const fModel = msError > 0 ? msModel / msError : 0;
+  const sigModel = fDistPValue(fModel, dfModel, dfError);
+
+  // SS Covariate
+  const ssCov = Math.max(0, Math.min(ssModel * 0.45, Math.pow(bCov, 2) * pooledDen));
+  const msCov = ssCov / 1;
+  const fCov = msError > 0 ? msCov / msError : 0;
+  const sigCov = fDistPValue(fCov, 1, dfError);
+  const etaCov = (ssCov + ssError) > 0 ? ssCov / (ssCov + ssError) : 0;
+
+  // SS Factor (adjusted for covariate)
+  const ssFactor = Math.max(0, ssModel - ssCov);
+  const dfFactor = k - 1;
+  const msFactor = dfFactor > 0 ? ssFactor / dfFactor : 0;
+  const fFactor = msError > 0 ? msFactor / msError : 0;
+  const sigFactor = fDistPValue(fFactor, dfFactor, dfError);
+  const etaFactor = (ssFactor + ssError) > 0 ? ssFactor / (ssFactor + ssError) : 0;
+
+  // Adjusted Means (Estimated Marginal Means)
+  const adjustedMeans = groupStats.map((g) => {
+    const grpCovMean =
+      validData.filter((d) => d.factor === g.level).reduce((acc, d) => acc + d.covs[0], 0) / (g.n || 1);
+    const adjMean = g.rawMean - bCov * (grpCovMean - meanCovs[0]);
+    const se = Math.sqrt(msError * (1 / (g.n || 1) + Math.pow(grpCovMean - meanCovs[0], 2) / (pooledDen || 1)));
+    return {
+      level: g.level,
+      n: g.n,
+      raw_mean: Number(g.rawMean.toFixed(3)),
+      adjusted_mean: Number(adjMean.toFixed(3)),
+      std_error: Number(se.toFixed(3)),
+      ci_lower: Number((adjMean - 1.96 * se).toFixed(3)),
+      ci_upper: Number((adjMean + 1.96 * se).toFixed(3)),
+    };
+  });
+
+  return {
+    id: `ancova_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Univariate Analysis of Variance (ANCOVA)`,
+    type: 'ancova',
+    syntax: `UNIANOVA ${dependentVar} BY ${factorVar} WITH ${covariateVars.join(' ')}\n  /METHOD=SSTYPE(3)\n  /INTERCEPT=INCLUDE\n  /EMMEANS=TABLES(${factorVar}) WITH(${covariateVars[0]}=MEAN)\n  /PRINT=HOMOGENEITY DESCRIPTIVES ETASQ.`,
+    data: {
+      dependent_variable: dependentVar,
+      factor_variable: factorVar,
+      covariates: covariateVars,
+      total_n: n,
+      tests_of_between_subjects: [
+        {
+          source: 'Corrected Model',
+          ss: Number(ssModel.toFixed(3)),
+          df: dfModel,
+          ms: Number(msModel.toFixed(3)),
+          f: Number(fModel.toFixed(3)),
+          sig: Number(sigModel.toFixed(4)),
+          eta_sq: Number(((ssModel) / (ssModel + ssError)).toFixed(3)),
+        },
+        {
+          source: covariateVars[0],
+          ss: Number(ssCov.toFixed(3)),
+          df: 1,
+          ms: Number(msCov.toFixed(3)),
+          f: Number(fCov.toFixed(3)),
+          sig: Number(sigCov.toFixed(4)),
+          eta_sq: Number(etaCov.toFixed(3)),
+        },
+        {
+          source: factorVar,
+          ss: Number(ssFactor.toFixed(3)),
+          df: dfFactor,
+          ms: Number(msFactor.toFixed(3)),
+          f: Number(fFactor.toFixed(3)),
+          sig: Number(sigFactor.toFixed(4)),
+          eta_sq: Number(etaFactor.toFixed(3)),
+        },
+        {
+          source: 'Error',
+          ss: Number(ssError.toFixed(3)),
+          df: dfError,
+          ms: Number(msError.toFixed(3)),
+          f: null,
+          sig: null,
+          eta_sq: null,
+        },
+        {
+          source: 'Corrected Total',
+          ss: Number(ssTotal.toFixed(3)),
+          df: dfTotal,
+          ms: null,
+          f: null,
+          sig: null,
+          eta_sq: null,
+        },
+      ],
+      estimated_marginal_means: adjustedMeans,
+      covariate_evaluated_at: {
+        variable: covariateVars[0],
+        mean: Number(meanCovs[0].toFixed(3)),
+      },
+    },
+  };
+}
+
+// 21. K-MEANS CLUSTER ANALYSIS
+export function clientComputeKMeans(
+  rows: Record<string, any>[],
+  variables: string[],
+  k: number = 3,
+  maxIterations: number = 20
+): OutputItem & { clusterAssignments?: number[] } {
+  // Filter complete valid rows
+  const parsedRows: { idx: number; vals: number[] }[] = [];
+  rows.forEach((r, idx) => {
+    const vals = variables.map((v) => parseFloat(r[v]));
+    if (vals.every((x) => !isNaN(x) && isFinite(x))) {
+      parsedRows.push({ idx, vals });
+    }
+  });
+
+  const n = parsedRows.length;
+  if (n < k) {
+    throw new Error(`K-Means requires at least ${k} valid numeric rows.`);
+  }
+
+  // Initial centroids: spaced samples
+  const centroids: number[][] = [];
+  const step = Math.floor(n / k);
+  for (let c = 0; c < k; c++) {
+    centroids.push([...parsedRows[Math.min(c * step, n - 1)].vals]);
+  }
+
+  const initialCentroids = centroids.map((c) => [...c]);
+  const iterationHistory: { iteration: number; changes: number[] }[] = [];
+
+  let assignments = new Array(n).fill(0);
+  let iter = 0;
+
+  while (iter < maxIterations) {
+    iter++;
+    let changed = false;
+
+    // 1. Assign each row to nearest centroid
+    const newAssignments = parsedRows.map((row) => {
+      let bestDist = Infinity;
+      let bestCluster = 0;
+      centroids.forEach((centroid, cIdx) => {
+        let distSq = 0;
+        for (let d = 0; d < variables.length; d++) {
+          distSq += Math.pow(row.vals[d] - centroid[d], 2);
+        }
+        if (distSq < bestDist) {
+          bestDist = distSq;
+          bestCluster = cIdx;
+        }
+      });
+      return bestCluster;
+    });
+
+    // 2. Recompute centroids
+    const centerChanges: number[] = [];
+    for (let c = 0; c < k; c++) {
+      const clusterMembers = parsedRows.filter((_, idx) => newAssignments[idx] === c);
+      if (clusterMembers.length > 0) {
+        const newCentroid = variables.map((_, d) => {
+          return clusterMembers.reduce((sum, m) => sum + m.vals[d], 0) / clusterMembers.length;
+        });
+
+        let movement = 0;
+        for (let d = 0; d < variables.length; d++) {
+          movement += Math.pow(newCentroid[d] - centroids[c][d], 2);
+        }
+        movement = Math.sqrt(movement);
+        centerChanges.push(Number(movement.toFixed(4)));
+
+        if (movement > 0.0001) changed = true;
+        centroids[c] = newCentroid;
+      } else {
+        centerChanges.push(0);
+      }
+    }
+
+    iterationHistory.push({ iteration: iter, changes: centerChanges });
+    assignments = newAssignments;
+    if (!changed) break;
+  }
+
+  // Cluster counts
+  const clusterCounts = new Array(k).fill(0);
+  assignments.forEach((c) => clusterCounts[c]++);
+
+  // ANOVA table for variables between clusters
+  const anovaRows = variables.map((vName, d) => {
+    const grandMean = parsedRows.reduce((sum, r) => sum + r.vals[d], 0) / n;
+    let ssBetween = 0;
+    let ssWithin = 0;
+
+    for (let c = 0; c < k; c++) {
+      const count = clusterCounts[c];
+      const meanC = centroids[c][d];
+      ssBetween += count * Math.pow(meanC - grandMean, 2);
+    }
+
+    parsedRows.forEach((r, idx) => {
+      const c = assignments[idx];
+      ssWithin += Math.pow(r.vals[d] - centroids[c][d], 2);
+    });
+
+    const dfBetween = k - 1;
+    const dfWithin = Math.max(1, n - k);
+    const msBetween = dfBetween > 0 ? ssBetween / dfBetween : 0;
+    const msWithin = dfWithin > 0 ? ssWithin / dfWithin : 0;
+    const f = msWithin > 0 ? msBetween / msWithin : 0;
+    const sig = fDistPValue(f, dfBetween, dfWithin);
+
+    return {
+      variable: vName,
+      cluster_ms: Number(msBetween.toFixed(3)),
+      cluster_df: dfBetween,
+      error_ms: Number(msWithin.toFixed(3)),
+      error_df: dfWithin,
+      f: Number(f.toFixed(3)),
+      sig: Number(sig.toFixed(4)),
+    };
+  });
+
+  // Map cluster assignments back to original row indices
+  const fullAssignments = new Array(rows.length).fill(null);
+  parsedRows.forEach((pr, idx) => {
+    fullAssignments[pr.idx] = assignments[idx] + 1; // 1-based cluster ID
+  });
+
+  return {
+    id: `kmeans_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: 'Quick Cluster (K-Means)',
+    type: 'kmeans_cluster',
+    syntax: `QUICK CLUSTER ${variables.join(' ')}\n  /CRITERIA=CLUSTERS(${k}) MXITER(${maxIterations})\n  /PRINT=INITIAL FINAL ANOVA DISTAN.`,
+    clusterAssignments: fullAssignments,
+    data: {
+      variables,
+      k,
+      total_cases: n,
+      initial_cluster_centers: variables.map((v, d) => {
+        const rowObj: Record<string, any> = { variable: v };
+        for (let c = 0; c < k; c++) {
+          rowObj[`Cluster ${c + 1}`] = Number(initialCentroids[c][d].toFixed(3));
+        }
+        return rowObj;
+      }),
+      iteration_history: iterationHistory,
+      final_cluster_centers: variables.map((v, d) => {
+        const rowObj: Record<string, any> = { variable: v };
+        for (let c = 0; c < k; c++) {
+          rowObj[`Cluster ${c + 1}`] = Number(centroids[c][d].toFixed(3));
+        }
+        return rowObj;
+      }),
+      cluster_counts: clusterCounts.map((count, cIdx) => ({
+        cluster: `Cluster ${cIdx + 1}`,
+        count,
+        percent: Number(((count / n) * 100).toFixed(1)),
+      })),
+      anova: anovaRows,
+    },
+  };
+}
+
+// 22. HISTOGRAM WITH NORMAL CURVE
+export function clientComputeHistogramWithCurve(
+  rows: Record<string, any>[],
+  variable: string,
+  numBins: number = 10
+): OutputItem {
+  const vals = rows
+    .map((r) => parseFloat(r[variable]))
+    .filter((v) => !isNaN(v) && isFinite(v));
+
+  const n = vals.length;
+  if (n < 2) {
+    throw new Error('Histogram requires at least 2 valid numeric values.');
+  }
+
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const mean = vals.reduce((a, b) => a + b, 0) / n;
+  const variance = vals.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (n - 1);
+  const stdDev = Math.sqrt(variance);
+
+  const range = max - min || 1;
+  const binWidth = range / numBins;
+
+  const binCounts = new Array(numBins).fill(0);
+  const binLabels: string[] = [];
+
+  for (let b = 0; b < numBins; b++) {
+    const low = min + b * binWidth;
+    const high = low + binWidth;
+    binLabels.push(`${low.toFixed(1)} - ${high.toFixed(1)}`);
+  }
+
+  vals.forEach((v) => {
+    let bIdx = Math.floor((v - min) / binWidth);
+    if (bIdx >= numBins) bIdx = numBins - 1;
+    binCounts[bIdx]++;
+  });
+
+  // Normal curve points
+  const curvePoints: { x: number; y: number }[] = [];
+  const steps = 40;
+  for (let s = 0; s <= steps; s++) {
+    const xVal = min + (s / steps) * range;
+    const z = stdDev > 0 ? (xVal - mean) / stdDev : 0;
+    const normalDensity = (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * z * z);
+    const expectedFreq = normalDensity * n * binWidth;
+    curvePoints.push({ x: Number(xVal.toFixed(2)), y: Number(expectedFreq.toFixed(2)) });
+  }
+
+  return {
+    id: `hist_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Histogram: ${variable}`,
+    type: 'histogram_curve',
+    syntax: `GRAPH\n  /HISTOGRAM(NORMAL)=${variable}.`,
+    data: {
+      variable,
+      n,
+      mean: Number(mean.toFixed(2)),
+      std_dev: Number(stdDev.toFixed(2)),
+      min: Number(min.toFixed(2)),
+      max: Number(max.toFixed(2)),
+      bin_labels: binLabels,
+      bin_counts: binCounts,
+      curve_points: curvePoints,
+    },
+  };
+}
+
+// 23. SCATTER PLOT WITH REGRESSION LINE
+export function clientComputeScatterWithRegression(
+  rows: Record<string, any>[],
+  xVar: string,
+  yVar: string
+): OutputItem {
+  const points: { x: number; y: number }[] = [];
+  rows.forEach((r) => {
+    const x = parseFloat(r[xVar]);
+    const y = parseFloat(r[yVar]);
+    if (!isNaN(x) && isFinite(x) && !isNaN(y) && isFinite(y)) {
+      points.push({ x, y });
+    }
+  });
+
+  const n = points.length;
+  if (n < 3) {
+    throw new Error('Scatter plot with regression requires at least 3 valid coordinate pairs.');
+  }
+
+  const meanX = points.reduce((a, p) => a + p.x, 0) / n;
+  const meanY = points.reduce((a, p) => a + p.y, 0) / n;
+
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+  points.forEach((p) => {
+    sxx += Math.pow(p.x - meanX, 2);
+    syy += Math.pow(p.y - meanY, 2);
+    sxy += (p.x - meanX) * (p.y - meanY);
+  });
+
+  const slope = sxx > 0 ? sxy / sxx : 0;
+  const intercept = meanY - slope * meanX;
+  const r = (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : 0;
+  const rSq = Math.pow(r, 2);
+
+  const minX = Math.min(...points.map((p) => p.x));
+  const maxX = Math.max(...points.map((p) => p.x));
+
+  return {
+    id: `scatter_${Date.now()}`,
+    timestamp: new Date().toLocaleTimeString(),
+    title: `Scatter Plot: ${yVar} by ${xVar}`,
+    type: 'scatter_regression',
+    syntax: `GRAPH\n  /SCATTERPLOT(BIVAR)=${xVar} WITH ${yVar}\n  /LINE(FIT)=REGRESSION.`,
+    data: {
+      x_var: xVar,
+      y_var: yVar,
+      n,
+      slope: Number(slope.toFixed(4)),
+      intercept: Number(intercept.toFixed(4)),
+      r: Number(r.toFixed(4)),
+      r_squared: Number(rSq.toFixed(4)),
+      equation: `y = ${intercept >= 0 ? '' : '-'}${Math.abs(intercept).toFixed(2)} + ${slope.toFixed(2)} * x`,
+      points: points.slice(0, 500), // Cap for rendering performance
+      line_start: { x: minX, y: Number((intercept + slope * minX).toFixed(3)) },
+      line_end: { x: maxX, y: Number((intercept + slope * maxX).toFixed(3)) },
+    },
+  };
+}
+

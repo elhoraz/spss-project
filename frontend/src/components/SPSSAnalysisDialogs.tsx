@@ -26,6 +26,10 @@ import {
   clientComputeChiSquareGoodness,
   clientComputeBinomialTest,
   clientComputeRunsTest,
+  clientComputeANCOVA,
+  clientComputeKMeans,
+  clientComputeHistogramWithCurve,
+  clientComputeScatterWithRegression,
 } from '../utils/clientStats';
 
 interface SPSSAnalysisDialogsProps {
@@ -58,6 +62,9 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   // State for variables selection
   const [selectedSourceVar, setSelectedSourceVar] = useState<string | null>(null);
   const [targetVars, setTargetVars] = useState<string[]>([]);
+  const [numClusters, setNumClusters] = useState<number>(3);
+  const [saveClusterMembership, setSaveClusterMembership] = useState<boolean>(true);
+  const [numBins, setNumBins] = useState<number>(10);
   const [selectedTargetVar, setSelectedTargetVar] = useState<string | null>(null);
 
   // Additional fields for specialized dialogs
@@ -462,6 +469,32 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         const v = depVar || targetVars[0] || variables[0]?.name;
         if (!v) throw new Error('Please select a Test Variable.');
         output = clientComputeRunsTest(rows, v, cutPointType, customCut);
+      } else if (modalType === 'ancova') {
+        const d = depVar || targetVars[0] || variables[0]?.name;
+        const f = factorVar || variables[1]?.name;
+        const covs = controlVar ? [controlVar] : targetVars.slice(1).length > 0 ? targetVars.slice(1) : [variables[2]?.name || variables[0]?.name];
+        if (!d || !f) throw new Error('Please select both a Dependent variable and a Factor variable.');
+        output = clientComputeANCOVA(rows, d, f, covs);
+      } else if (modalType === 'kmeans_cluster') {
+        const vars = targetVars.length >= 1 ? targetVars : [variables[0]?.name, variables[1]?.name];
+        const res = clientComputeKMeans(rows, vars, numClusters || 3);
+        if (saveClusterMembership && res.clusterAssignments && onApplyDataOperation) {
+          const updatedRows = rows.map((r, idx) => ({
+            ...r,
+            QCL_1: res.clusterAssignments![idx] ?? null,
+          }));
+          onApplyDataOperation(updatedRows);
+        }
+        output = res;
+      } else if (modalType === 'histogram_curve') {
+        const v = depVar || targetVars[0] || variables[0]?.name;
+        if (!v) throw new Error('Please select a Variable for Histogram.');
+        output = clientComputeHistogramWithCurve(rows, v, numBins || 10);
+      } else if (modalType === 'scatter_regression') {
+        const x = chartXVar || targetVars[0] || variables[0]?.name;
+        const y = chartYVar || targetVars[1] || variables[1]?.name;
+        if (!x || !y) throw new Error('Please select both X and Y variables for Scatter Plot.');
+        output = clientComputeScatterWithRegression(rows, x, y);
       } else if (modalType === 'chart_builder') {
         const x = chartXVar || targetVars[0] || variables[0]?.name;
         const y = chartYVar || targetVars[1];
@@ -548,6 +581,14 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       syntax = `NPAR TESTS\n  /BINOMIAL(${testProp})=${depVar || targetVars[0] || 'gender'}.`;
     } else if (modalType === 'runs_test') {
       syntax = `NPAR TESTS\n  /RUNS(${cutPointType.toUpperCase()})=${depVar || targetVars[0] || 'salary'}.`;
+    } else if (modalType === 'ancova') {
+      syntax = `UNIANOVA ${depVar || 'salary'} BY ${factorVar || 'jobcat'} WITH ${controlVar || 'educ'}\n  /METHOD=SSTYPE(3)\n  /INTERCEPT=INCLUDE\n  /EMMEANS=TABLES(${factorVar || 'jobcat'}).`;
+    } else if (modalType === 'kmeans_cluster') {
+      syntax = `QUICK CLUSTER ${(targetVars.length > 0 ? targetVars : ['salary', 'salbegin']).join(' ')}\n  /CRITERIA=CLUSTERS(${numClusters || 3})\n  /SAVE CLUSTER(QCL_1).`;
+    } else if (modalType === 'histogram_curve') {
+      syntax = `GRAPH\n  /HISTOGRAM(NORMAL)=${depVar || targetVars[0] || 'salary'}.`;
+    } else if (modalType === 'scatter_regression') {
+      syntax = `GRAPH\n  /SCATTERPLOT(BIVAR)=${chartXVar || 'salary'} WITH ${chartYVar || 'salbegin'}\n  /LINE(FIT)=REGRESSION.`;
     }
 
     onPasteSyntax(syntax);
@@ -566,6 +607,10 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     chi_square_goodness: 'Chi-Square Test (Goodness of Fit)',
     binomial_test: 'Binomial Test',
     runs_test: 'Runs Test',
+    ancova: 'Univariate Analysis of Variance (ANCOVA)',
+    kmeans_cluster: 'K-Means Cluster Analysis',
+    histogram_curve: 'Histogram with Normal Curve',
+    scatter_regression: 'Scatter Plot with Fit Line',
     one_sample_t_test: 'One-Sample T Test',
     independent_t_test: 'Independent-Samples T Test',
     paired_t_test: 'Paired-Samples T Test',
@@ -1321,6 +1366,152 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   </div>
                 )}
               </div>
+            ) : modalType === 'ancova' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Dependent Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Dependent --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Fixed Factor (Grouping):</span>
+                  <select
+                    className="spss-text-input"
+                    value={factorVar}
+                    onChange={(e) => setFactorVar(e.target.value)}
+                  >
+                    <option value="">-- Select Factor --</option>
+                    {variables.map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Covariate (Continuous Control):</span>
+                  <select
+                    className="spss-text-input"
+                    value={controlVar}
+                    onChange={(e) => setControlVar(e.target.value)}
+                  >
+                    <option value="">-- Select Covariate --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : modalType === 'kmeans_cluster' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Number of Clusters (k):</span>
+                  <input
+                    type="number"
+                    min="2"
+                    max="10"
+                    className="spss-text-input"
+                    style={{ width: 80 }}
+                    value={numClusters}
+                    onChange={(e) => setNumClusters(Math.max(2, parseInt(e.target.value) || 2))}
+                  />
+                </div>
+                <label className="spss-checkbox-label" style={{ fontSize: 11, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={saveClusterMembership}
+                    onChange={(e) => setSaveClusterMembership(e.target.checked)}
+                  /> Save cluster membership to active dataset as 'QCL_1'
+                </label>
+                <div>
+                  <span className="spss-picker-label">Variables to Cluster:</span>
+                  <div className="spss-var-listbox" style={{ height: 130 }}>
+                    {targetVars.map((tv) => {
+                      const meta = variables.find((v) => v.name === tv);
+                      return (
+                        <div
+                          key={tv}
+                          className={`spss-var-list-item ${selectedTargetVar === tv ? 'selected' : ''}`}
+                          onClick={() => setSelectedTargetVar(tv)}
+                          onDoubleClick={handleMoveToSource}
+                        >
+                          {meta && renderIcon(meta)}
+                          <span>{tv}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : modalType === 'histogram_curve' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">Variable:</span>
+                  <select
+                    className="spss-text-input"
+                    value={depVar}
+                    onChange={(e) => setDepVar(e.target.value)}
+                  >
+                    <option value="">-- Select Variable --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.label || 'Numeric'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Number of Bins:</span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="50"
+                    className="spss-text-input"
+                    style={{ width: 80 }}
+                    value={numBins}
+                    onChange={(e) => setNumBins(Math.max(3, parseInt(e.target.value) || 10))}
+                  />
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Generates an SPSS-style histogram with normal distribution bell curve overlay.
+                </div>
+              </div>
+            ) : modalType === 'scatter_regression' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <span className="spss-picker-label">X-Axis Variable (Independent):</span>
+                  <select
+                    className="spss-text-input"
+                    value={chartXVar}
+                    onChange={(e) => setChartXVar(e.target.value)}
+                  >
+                    <option value="">-- Select X-Axis --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <span className="spss-picker-label">Y-Axis Variable (Dependent):</span>
+                  <select
+                    className="spss-text-input"
+                    value={chartYVar}
+                    onChange={(e) => setChartYVar(e.target.value)}
+                  >
+                    <option value="">-- Select Y-Axis --</option>
+                    {variables.filter((v) => v.type === 'Numeric').map((v) => (
+                      <option key={v.name} value={v.name}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  Plots (X, Y) scatter points and computes linear regression fit line (y = mx + b) with R².
+                </div>
+              </div>
             ) : modalType === 'chart_builder' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div>
@@ -1451,6 +1642,10 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   chi_square_goodness: 'Chi-Square Goodness-of-Fit: Tests whether observed category frequencies match expected equal proportions.',
                   binomial_test: 'Binomial Test: Tests whether observed proportions of a dichotomous variable differ significantly from an expected proportion (e.g. 0.50).',
                   runs_test: 'Runs Test: Tests the hypothesis of randomness for a sequence of numeric data points relative to a specified cut point (median or mean).',
+                  ancova: 'ANCOVA (Analysis of Covariance): Tests for differences in group means on a dependent metric variable while controlling for continuous covariate(s). Provides Type III Sum of Squares, F-tests, and Estimated Marginal Means adjusted for covariates.',
+                  kmeans_cluster: 'K-Means Cluster: Segments cases into K homogeneous clusters based on Euclidean distances across multiple scale variables, displaying iteration history, final cluster centers, and ANOVA separation.',
+                  histogram_curve: 'Histogram: Displays the distribution frequency of a scale variable with a superimposed theoretical Gaussian normal distribution bell curve.',
+                  scatter_regression: 'Scatter Plot with Fit Line: Plots paired (X, Y) observations with an overlay linear regression trend line and coefficient of determination (R²).',
                   split_file: 'Split File: Stratifies your dataset by a grouping variable so that subsequent statistical analyses are performed separately for each category.',
                   weight_cases: 'Weight Cases: Gives cases different weights (by frequency or importance) for statistical calculations and frequency tables.',
                   chart_builder: 'Chart Builder: Generates statistical visualizations (Bar, Pie, Histogram, Scatter, Line, Boxplot).',

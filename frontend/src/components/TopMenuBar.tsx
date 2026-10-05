@@ -283,6 +283,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('weight_cases'))}>
               Weight Cases...
             </div>
+            <div className="spss-dropdown-divider" />
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('aggregate_data'))}>
+              Aggregate Data...
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('merge_files'))}>
+              Merge Files...
+            </div>
           </div>
         )}
       </div>
@@ -379,6 +386,19 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               </div>
             </div>
 
+            {/* General Linear Model Submenu */}
+            <div className="spss-dropdown-item">
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> General Linear Model
+              </div>
+              <ChevronRight size={14} />
+              <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('ancova'))}>
+                  Univariate (ANCOVA)...
+                </div>
+              </div>
+            </div>
+
             {/* Correlate Submenu */}
             <div className="spss-dropdown-item">
               <div className="spss-dropdown-item-left">
@@ -410,6 +430,19 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
                 </div>
                 <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('logistic_regression'))}>
                   Binary Logistic Regression...
+                </div>
+              </div>
+            </div>
+
+            {/* Classify Submenu */}
+            <div className="spss-dropdown-item">
+              <div className="spss-dropdown-item-left">
+                <Sliders size={14} /> Classify
+              </div>
+              <ChevronRight size={14} />
+              <div className="spss-submenu">
+                <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('kmeans_cluster'))}>
+                  K-Means Cluster...
                 </div>
               </div>
             </div>
@@ -484,6 +517,16 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('chart_builder'))}>
               <div className="spss-dropdown-item-left">
                 <BarChart2 size={14} /> Chart Builder...
+              </div>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('histogram_curve'))}>
+              <div className="spss-dropdown-item-left">
+                <BarChart2 size={14} /> Histogram with Normal Curve...
+              </div>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('scatter_regression'))}>
+              <div className="spss-dropdown-item-left">
+                <BarChart2 size={14} /> Scatter Plot with Fit Line...
               </div>
             </div>
             <div className="spss-dropdown-divider" />

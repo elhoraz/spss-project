@@ -1802,6 +1802,370 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       );
     }
 
+    // 16. ANCOVA (Analysis of Covariance)
+    if (type === 'ancova') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Tests of Between-Subjects Effects */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Tests of Between-Subjects Effects</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Source</th>
+                  <th>Type III Sum of Squares</th>
+                  <th>df</th>
+                  <th>Mean Square</th>
+                  <th>F</th>
+                  <th>Sig.</th>
+                  <th>Partial Eta Squared</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.tests_of_between_subjects?.map((row: any, rIdx: number) => (
+                  <tr key={rIdx} className={row.source === 'Corrected Total' ? 'spss-pivot-total-row' : ''}>
+                    <td className="align-left" style={{ fontWeight: row.source === 'Corrected Model' || row.source === 'Corrected Total' ? 700 : 500 }}>
+                      {row.source}
+                    </td>
+                    <td>{row.ss?.toLocaleString()}</td>
+                    <td>{row.df}</td>
+                    <td>{row.ms ? row.ms?.toLocaleString() : '-'}</td>
+                    <td>{row.f !== null ? row.f : '-'}</td>
+                    <td style={{ color: row.sig !== null && row.sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: row.sig !== null && row.sig < 0.05 ? 700 : 400 }}>
+                      {row.sig !== null ? (row.sig < 0.001 ? '< .001' : row.sig) : '-'}
+                    </td>
+                    <td>{row.eta_sq !== null ? row.eta_sq : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">
+              a. Dependent Variable: {data.dependent_variable}. R Squared = {data.tests_of_between_subjects?.[0]?.eta_sq}
+            </div>
+          </div>
+
+          {/* Estimated Marginal Means */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Estimated Marginal Means: {data.factor_variable}</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">{data.factor_variable}</th>
+                  <th>N</th>
+                  <th>Observed Mean</th>
+                  <th>Adjusted Mean</th>
+                  <th>Std. Error</th>
+                  <th colSpan={2}>95% Confidence Interval</th>
+                </tr>
+                <tr>
+                  <th colSpan={5}></th>
+                  <th>Lower Bound</th>
+                  <th>Upper Bound</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.estimated_marginal_means?.map((g: any, gIdx: number) => (
+                  <tr key={gIdx}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{g.level}</td>
+                    <td>{g.n}</td>
+                    <td>{g.raw_mean}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{g.adjusted_mean}</td>
+                    <td>{g.std_error}</td>
+                    <td>{g.ci_lower}</td>
+                    <td>{g.ci_upper}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="spss-pivot-notes">
+              a. Covariates appearing in the model are evaluated at the following values: {data.covariate_evaluated_at?.variable} = {data.covariate_evaluated_at?.mean}.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 17. K-MEANS CLUSTER
+    if (type === 'kmeans_cluster') {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Final Cluster Centers */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Final Cluster Centers</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  {Array.from({ length: data.k || 3 }).map((_, c) => (
+                    <th key={c}>Cluster {c + 1}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.final_cluster_centers?.map((row: any, rIdx: number) => (
+                  <tr key={rIdx}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{row.variable}</td>
+                    {Array.from({ length: data.k || 3 }).map((_, c) => (
+                      <td key={c} style={{ fontWeight: 600 }}>{row[`Cluster ${c + 1}`]}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Number of Cases in Each Cluster */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Number of Cases in each Cluster</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Cluster</th>
+                  <th>Frequency (Cases)</th>
+                  <th>Percent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.cluster_counts?.map((c: any, cIdx: number) => (
+                  <tr key={cIdx}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{c.cluster}</td>
+                    <td>{c.count}</td>
+                    <td>{c.percent}%</td>
+                  </tr>
+                ))}
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left">Valid Total</td>
+                  <td>{data.total_cases}</td>
+                  <td>100.0%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* ANOVA Table */}
+          {data.anova && (
+            <div className="spss-pivot-table-wrapper">
+              <div className="spss-pivot-title">ANOVA (Between vs Within Clusters)</div>
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left">Variable</th>
+                    <th>Cluster Mean Square</th>
+                    <th>df</th>
+                    <th>Error Mean Square</th>
+                    <th>df</th>
+                    <th>F</th>
+                    <th>Sig.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.anova.map((a: any, aIdx: number) => (
+                    <tr key={aIdx}>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{a.variable}</td>
+                      <td>{a.cluster_ms}</td>
+                      <td>{a.cluster_df}</td>
+                      <td>{a.error_ms}</td>
+                      <td>{a.error_df}</td>
+                      <td>{a.f}</td>
+                      <td style={{ color: a.sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: 600 }}>
+                        {a.sig < 0.001 ? '< .001' : a.sig}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="spss-pivot-notes">The F tests should be used only for descriptive purposes since the clusters have been chosen to maximize the differences among cases in different clusters.</div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 18. HISTOGRAM WITH NORMAL CURVE
+    if (type === 'histogram_curve') {
+      const { variable, n, mean, std_dev, min, max, bin_labels = [], bin_counts = [], curve_points = [] } = data;
+      const maxCount = Math.max(...bin_counts, 1);
+      const chartHeight = 220;
+      const chartWidth = 480;
+      const padding = { top: 20, right: 30, bottom: 40, left: 50 };
+      const plotW = chartWidth - padding.left - padding.right;
+      const plotH = chartHeight - padding.top - padding.bottom;
+
+      const barWidth = plotW / bin_counts.length;
+
+      // Coordinate scales
+      const scaleX = (val: number) => padding.left + ((val - min) / (max - min || 1)) * plotW;
+      const scaleY = (count: number) => padding.top + plotH - (count / (maxCount * 1.15)) * plotH;
+
+      // Bell curve SVG path
+      const curveD = curve_points.length > 1
+        ? curve_points
+            .map((pt: any, idx: number) => {
+              const xPos = scaleX(pt.x);
+              const yPos = scaleY(pt.y);
+              return `${idx === 0 ? 'M' : 'L'} ${xPos.toFixed(1)} ${yPos.toFixed(1)}`;
+            })
+            .join(' ')
+        : '';
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Histogram with Normal Curve: {variable}</div>
+            <div style={{ background: '#fff', border: '1px solid var(--border-app)', padding: 16, borderRadius: 4, display: 'inline-block' }}>
+              <svg width={chartWidth} height={chartHeight} style={{ overflow: 'visible' }}>
+                {/* Y Axis line */}
+                <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotH} stroke="#94a3b8" strokeWidth="1.5" />
+                {/* X Axis line */}
+                <line x1={padding.left} y1={padding.top + plotH} x2={padding.left + plotW} y2={padding.top + plotH} stroke="#94a3b8" strokeWidth="1.5" />
+
+                {/* Y Axis Ticks */}
+                <text x={padding.left - 8} y={scaleY(maxCount) + 4} textAnchor="end" fontSize="10" fill="#64748b">{maxCount}</text>
+                <text x={padding.left - 8} y={scaleY(Math.round(maxCount / 2)) + 4} textAnchor="end" fontSize="10" fill="#64748b">{Math.round(maxCount / 2)}</text>
+                <text x={padding.left - 8} y={padding.top + plotH + 4} textAnchor="end" fontSize="10" fill="#64748b">0</text>
+
+                {/* Histogram Bars */}
+                {bin_counts.map((cnt: number, bIdx: number) => {
+                  const x = padding.left + bIdx * barWidth;
+                  const y = scaleY(cnt);
+                  const h = Math.max(0, padding.top + plotH - y);
+                  return (
+                    <g key={bIdx}>
+                      <rect
+                        x={x + 1}
+                        y={y}
+                        width={Math.max(2, barWidth - 2)}
+                        height={h}
+                        fill="#38bdf8"
+                        stroke="#0284c7"
+                        strokeWidth="1"
+                      />
+                    </g>
+                  );
+                })}
+
+                {/* Normal Distribution Bell Curve Line */}
+                {curveD && (
+                  <path d={curveD} fill="none" stroke="#dc2626" strokeWidth="2.5" />
+                )}
+
+                {/* X Axis Min/Max/Mean Labels */}
+                <text x={padding.left} y={padding.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#64748b">{min}</text>
+                <text x={scaleX(mean)} y={padding.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#0284c7" fontWeight="bold">{mean}</text>
+                <text x={padding.left + plotW} y={padding.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#64748b">{max}</text>
+
+                {/* Legend Box inside Chart (Classic SPSS Style) */}
+                <rect x={chartWidth - 140} y={padding.top + 5} width="120" height="55" fill="#f8fafc" stroke="#cbd5e1" rx="3" />
+                <text x={chartWidth - 130} y={padding.top + 20} fontSize="10" fill="#334155" fontWeight="bold">Mean = {mean}</text>
+                <text x={chartWidth - 130} y={padding.top + 35} fontSize="10" fill="#334155">Std. Dev. = {std_dev}</text>
+                <text x={chartWidth - 130} y={padding.top + 50} fontSize="10" fill="#334155">N = {n}</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 19. SCATTER PLOT WITH REGRESSION LINE
+    if (type === 'scatter_regression') {
+      const { x_var, y_var, n, slope, intercept, r, r_squared, equation, points = [], line_start, line_end } = data;
+      const chartHeight = 240;
+      const chartWidth = 500;
+      const padding = { top: 25, right: 30, bottom: 45, left: 55 };
+      const plotW = chartWidth - padding.left - padding.right;
+      const plotH = chartHeight - padding.top - padding.bottom;
+
+      const minX = points.length > 0 ? Math.min(...points.map((p: any) => p.x)) : 0;
+      const maxX = points.length > 0 ? Math.max(...points.map((p: any) => p.x)) : 100;
+      const minY = points.length > 0 ? Math.min(...points.map((p: any) => p.y)) : 0;
+      const maxY = points.length > 0 ? Math.max(...points.map((p: any) => p.y)) : 100;
+
+      const scaleX = (x: number) => padding.left + ((x - minX) / (maxX - minX || 1)) * plotW;
+      const scaleY = (y: number) => padding.top + plotH - ((y - minY) / (maxY - minY || 1)) * plotH;
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Scatter Plot with Fit Line: {y_var} by {x_var}</div>
+            <div style={{ background: '#fff', border: '1px solid var(--border-app)', padding: 16, borderRadius: 4, display: 'inline-block' }}>
+              <svg width={chartWidth} height={chartHeight} style={{ overflow: 'visible' }}>
+                {/* Axes */}
+                <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotH} stroke="#94a3b8" strokeWidth="1.5" />
+                <line x1={padding.left} y1={padding.top + plotH} x2={padding.left + plotW} y2={padding.top + plotH} stroke="#94a3b8" strokeWidth="1.5" />
+
+                {/* Y Axis Labels */}
+                <text x={padding.left - 8} y={scaleY(maxY) + 4} textAnchor="end" fontSize="10" fill="#64748b">{maxY.toFixed(0)}</text>
+                <text x={padding.left - 8} y={scaleY(minY) + 4} textAnchor="end" fontSize="10" fill="#64748b">{minY.toFixed(0)}</text>
+
+                {/* X Axis Labels */}
+                <text x={scaleX(minX)} y={padding.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#64748b">{minX.toFixed(0)}</text>
+                <text x={scaleX(maxX)} y={padding.top + plotH + 16} textAnchor="middle" fontSize="10" fill="#64748b">{maxX.toFixed(0)}</text>
+                <text x={padding.left + plotW / 2} y={padding.top + plotH + 32} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#334155">{x_var}</text>
+
+                {/* Scatter Points */}
+                {points.map((pt: any, pIdx: number) => (
+                  <circle
+                    key={pIdx}
+                    cx={scaleX(pt.x)}
+                    cy={scaleY(pt.y)}
+                    r="3.5"
+                    fill="#3b82f6"
+                    opacity="0.75"
+                    stroke="#1d4ed8"
+                    strokeWidth="0.8"
+                  />
+                ))}
+
+                {/* Linear Fit Line */}
+                {line_start && line_end && (
+                  <line
+                    x1={scaleX(line_start.x)}
+                    y1={scaleY(line_start.y)}
+                    x2={scaleX(line_end.x)}
+                    y2={scaleY(line_end.y)}
+                    stroke="#ef4444"
+                    strokeWidth="2.5"
+                  />
+                )}
+
+                {/* Formula & R² Box */}
+                <rect x={chartWidth - 170} y={padding.top + 5} width="150" height="42" fill="#f8fafc" stroke="#cbd5e1" rx="3" />
+                <text x={chartWidth - 160} y={padding.top + 20} fontSize="10" fill="#334155" fontWeight="bold">{equation}</text>
+                <text x={chartWidth - 160} y={padding.top + 35} fontSize="10" fill="#ef4444" fontWeight="bold">R² Linear = {r_squared}</text>
+              </svg>
+            </div>
+          </div>
+
+          {/* Model Summary Table */}
+          <div className="spss-pivot-table-wrapper">
+            <div className="spss-pivot-title">Model Summary &amp; Parameter Estimates</div>
+            <table className="spss-pivot-table" style={{ maxWidth: 460 }}>
+              <thead>
+                <tr>
+                  <th className="align-left">Equation</th>
+                  <th>R</th>
+                  <th>R Square</th>
+                  <th>Constant (b0)</th>
+                  <th>Slope (b1)</th>
+                  <th>N</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left" style={{ fontWeight: 600 }}>Linear</td>
+                  <td>{r}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{r_squared}</td>
+                  <td>{intercept}</td>
+                  <td>{slope}</td>
+                  <td>{n}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
     // Generic Fallback Table for custom output data
     if (data && typeof data === 'object') {
       const entries = Object.entries(data).filter(([k]) => k !== 'title');
