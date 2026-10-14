@@ -358,12 +358,12 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       const vars = targetVars.length > 0 ? targetVars : (variables.length > 0 ? [variables[0].name] : []);
       if (vars.length === 0) throw new Error('Please select at least one variable for Frequencies.');
       output = await statsApiService.runFrequencies(currentRows, vars);
-      if (!output) output = clientComputeFrequencies(currentRows, vars, {}, weightByVariable);
+      if (!output) output = clientComputeFrequencies(currentRows, vars, {}, weightByVariable, variables);
     } else if (modalType === 'descriptives') {
       const vars = targetVars.length > 0 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name);
       if (vars.length === 0) throw new Error('Please select at least one numeric variable for Descriptives.');
       output = await statsApiService.runDescriptives(currentRows, vars);
-      if (!output) output = clientComputeDescriptives(currentRows, vars, weightByVariable);
+      if (!output) output = clientComputeDescriptives(currentRows, vars, weightByVariable, variables);
     } else if (modalType === 'crosstabs') {
       const r = rowVar || targetVars[0];
       const c = colVar || targetVars[1];
@@ -374,24 +374,24 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
       if (vars.length < 2) throw new Error('Please select at least two numeric variables for Bivariate Correlations.');
       output = await statsApiService.runCorrelations(currentRows, vars);
-      if (!output) output = clientComputeCorrelations(currentRows, vars);
+      if (!output) output = clientComputeCorrelations(currentRows, vars, variables);
     } else if (modalType === 'one_sample_t_test') {
       const vars = targetVars.length > 0 ? targetVars : [];
       if (vars.length === 0) throw new Error('Please select at least one Test Variable for One-Sample T-Test.');
       output = await statsApiService.runOneSampleTTest(currentRows, vars, testValue);
-      if (!output) output = clientComputeOneSampleTTest(currentRows, vars, testValue, weightByVariable);
+      if (!output) output = clientComputeOneSampleTTest(currentRows, vars, testValue, weightByVariable, variables);
     } else if (modalType === 'independent_t_test') {
       const vars = targetVars.length > 0 ? targetVars : [];
       const g = groupVar;
       if (vars.length === 0 || !g) throw new Error('Please select Test Variable(s) and a Grouping Variable for Independent Samples T-Test.');
       output = await statsApiService.runIndependentTTest(currentRows, vars, g, group1Val, group2Val);
-      if (!output) output = clientComputeIndependentTTest(currentRows, vars, g, group1Val, group2Val, weightByVariable);
+      if (!output) output = clientComputeIndependentTTest(currentRows, vars, g, group1Val, group2Val, weightByVariable, variables);
     } else if (modalType === 'paired_t_test') {
       const v1 = targetVars[0];
       const v2 = targetVars[1];
       if (!v1 || !v2) throw new Error('Please select two variables for Paired-Samples T-Test.');
       output = await statsApiService.runPairedTTest(currentRows, [[v1, v2]]);
-      if (!output) output = clientComputePairedTTest(currentRows, [[v1, v2]]);
+      if (!output) output = clientComputePairedTTest(currentRows, [[v1, v2]], variables);
     } else if (modalType === 'one_way_anova') {
       const d = depVar || targetVars[0];
       const f = factorVar;

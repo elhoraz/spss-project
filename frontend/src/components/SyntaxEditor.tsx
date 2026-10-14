@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { Play, RotateCcw, Download, Upload, Sparkles, CheckCircle2 } from 'lucide-react';
-import { OutputItem } from '../types/spss';
+import { OutputItem, VariableMeta } from '../types/spss';
 import { clientRunSyntax } from '../utils/clientStats';
 import { statsApiService } from '../services/api';
 
@@ -9,6 +9,7 @@ interface SyntaxEditorProps {
   syntaxCode: string;
   onChangeSyntax: (code: string) => void;
   rows: Record<string, any>[];
+  variables?: VariableMeta[];
   onOutputsGenerated: (newOutputs: OutputItem[]) => void;
 }
 
@@ -16,6 +17,7 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
   syntaxCode,
   onChangeSyntax,
   rows,
+  variables,
   onOutputsGenerated,
 }) => {
   const [selectedPreset, setSelectedPreset] = useState<string>('');
@@ -191,7 +193,7 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
     if (!syntaxCode.trim()) return;
     let generated = await statsApiService.runSyntax(syntaxCode, rows);
     if (!generated || generated.length === 0) {
-      generated = clientRunSyntax(syntaxCode, rows);
+      generated = clientRunSyntax(syntaxCode, rows, variables);
     }
     if (generated && generated.length > 0) {
       onOutputsGenerated(generated);
@@ -219,7 +221,7 @@ export const SyntaxEditor: React.FC<SyntaxEditorProps> = ({
 
     let generated = await statsApiService.runSyntax(codeToRun, rows);
     if (!generated || generated.length === 0) {
-      generated = clientRunSyntax(codeToRun, rows);
+      generated = clientRunSyntax(codeToRun, rows, variables);
     }
     if (generated && generated.length > 0) {
       onOutputsGenerated(generated);

@@ -296,7 +296,7 @@ export const App: React.FC = () => {
         } else if (e.key === 'r' || e.key === 'R') {
           if (activeView === 'syntax' && syntaxCode.trim()) {
             e.preventDefault();
-            const gen = clientRunSyntax(syntaxCode, dataset.rows);
+            const gen = clientRunSyntax(syntaxCode, dataset.rows, dataset.variables);
             if (gen.length > 0) {
               setOutputs((prev) => [...gen, ...prev]);
               setActiveView('output');
@@ -1048,6 +1048,7 @@ export const App: React.FC = () => {
               syntaxCode={syntaxCode}
               onChangeSyntax={setSyntaxCode}
               rows={dataset.rows}
+              variables={dataset.variables}
               onOutputsGenerated={(newItems) => {
                 setOutputs((prev) => [...newItems, ...prev]);
                 setActiveView('output');

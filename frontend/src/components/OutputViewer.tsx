@@ -1443,18 +1443,18 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               {data.rows?.map((row: any, i: number) => (
                 <tr key={i}>
                   <td className="align-left" style={{ fontWeight: 600 }}>{row.variable}</td>
-                  <td>{row.valid_n}</td>
-                  <td>{row.min?.toLocaleString()}</td>
-                  <td>{row.max?.toLocaleString()}</td>
-                  <td>{row.mean?.toLocaleString()}</td>
-                  <td>{row.se_mean}</td>
-                  <td>{row.std_dev?.toLocaleString()}</td>
-                  <td>{row.variance?.toLocaleString()}</td>
+                  <td>{row.valid_n ?? '.'}</td>
+                  <td>{row.min !== null && row.min !== undefined ? row.min.toLocaleString() : '.'}</td>
+                  <td>{row.max !== null && row.max !== undefined ? row.max.toLocaleString() : '.'}</td>
+                  <td>{row.mean !== null && row.mean !== undefined ? row.mean.toLocaleString() : '.'}</td>
+                  <td>{row.se_mean !== null && row.se_mean !== undefined ? row.se_mean : '.'}</td>
+                  <td>{row.std_dev !== null && row.std_dev !== undefined ? row.std_dev.toLocaleString() : '.'}</td>
+                  <td>{row.variance !== null && row.variance !== undefined ? row.variance.toLocaleString() : '.'}</td>
                 </tr>
               ))}
               <tr className="spss-pivot-total-row">
                 <td className="align-left" style={{ fontWeight: 600 }}>Valid N (listwise)</td>
-                <td>{data.rows?.[0]?.valid_n || 0}</td>
+                <td>{data.valid_n_listwise ?? data.rows?.[0]?.valid_n ?? 0}</td>
                 <td></td>
                 <td></td>
                 <td></td>
@@ -1496,31 +1496,41 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td className="align-left">{r.label !== r.value ? `${r.label} (${r.value})` : r.value}</td>
                       <td>{r.frequency}</td>
                       <td>{r.percent}</td>
-                      <td>{r.valid_percent}</td>
-                      <td>{r.cumulative_percent}</td>
+                      <td>{r.valid_percent !== null && r.valid_percent !== undefined ? r.valid_percent : '.'}</td>
+                      <td>{r.cumulative_percent !== null && r.cumulative_percent !== undefined ? r.cumulative_percent : '.'}</td>
                     </tr>
                   ))}
                   <tr className="spss-pivot-total-row">
                     <td className="align-left" style={{ fontWeight: 600 }}>Total</td>
                     <td>{table.total_valid}</td>
-                    <td>100.0</td>
-                    <td>100.0</td>
+                    <td>{table.valid_total_percent !== undefined ? table.valid_total_percent.toFixed(1) : (table.total > 0 ? ((table.total_valid / table.total) * 100).toFixed(1) : '100.0')}</td>
+                    <td>{table.valid_percent_total !== null && table.valid_percent_total !== undefined ? '100.0' : '.'}</td>
                     <td></td>
                   </tr>
                   {table.total_missing > 0 && (
                     <>
-                      <tr>
-                        <td className="align-left" rowSpan={2} style={{ color: 'var(--text-muted)', verticalAlign: 'top' }}>Missing</td>
-                        <td className="align-left" style={{ color: 'var(--text-muted)' }}>System</td>
-                        <td>{table.total_missing}</td>
-                        <td>{((table.total_missing / table.total) * 100).toFixed(1)}</td>
-                        <td></td>
-                        <td></td>
-                      </tr>
+                      {(table.missing_rows && table.missing_rows.length > 0 ? table.missing_rows : [
+                        { value: '.', label: 'System', frequency: table.total_missing, percent: ((table.total_missing / (table.total || 1)) * 100).toFixed(1) }
+                      ]).map((mr: any, mrIdx: number, arr: any[]) => (
+                        <tr key={`m_${mrIdx}`}>
+                          {mrIdx === 0 && (
+                            <td className="align-left" rowSpan={arr.length + 1} style={{ color: 'var(--text-muted)', verticalAlign: 'top' }}>
+                              Missing
+                            </td>
+                          )}
+                          <td className="align-left" style={{ color: 'var(--text-muted)' }}>
+                            {mr.label !== mr.value && mr.value !== '.' ? `${mr.label} (${mr.value})` : mr.label}
+                          </td>
+                          <td>{mr.frequency}</td>
+                          <td>{mr.percent}</td>
+                          <td></td>
+                          <td></td>
+                        </tr>
+                      ))}
                       <tr className="spss-pivot-total-row">
                         <td className="align-left" style={{ color: 'var(--text-muted)' }}>Total</td>
                         <td>{table.total_missing}</td>
-                        <td>{((table.total_missing / table.total) * 100).toFixed(1)}</td>
+                        <td>{table.missing_total_percent !== undefined ? table.missing_total_percent.toFixed(1) : ((table.total_missing / (table.total || 1)) * 100).toFixed(1)}</td>
                         <td></td>
                         <td></td>
                       </tr>
@@ -1667,7 +1677,9 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pearson Correlation</td>
                     {rowItem.correlations?.map((c: any, cIdx: number) => (
                       <td key={cIdx} style={{ fontWeight: 600 }}>
-                        {c.coefficient !== null ? (c.var1 === c.var2 ? '1' : `${c.coefficient}${c.flag || ''}`) : '-'}
+                        {c.coefficient !== null && c.coefficient !== undefined
+                          ? (c.var1 === c.var2 ? '1' : `${c.coefficient}${c.flag || ''}`)
+                          : '.'}
                       </td>
                     ))}
                   </tr>
@@ -1675,14 +1687,18 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sig. (2-tailed)</td>
                     {rowItem.correlations?.map((c: any, cIdx: number) => (
                       <td key={cIdx} style={{ fontSize: 11 }}>
-                        {c.var1 === c.var2 ? '' : c.sig_2_tailed}
+                        {c.var1 === c.var2
+                          ? ''
+                          : (c.sig_2_tailed !== null && c.sig_2_tailed !== undefined
+                              ? (c.sig_2_tailed === 0 ? '.000' : c.sig_2_tailed)
+                              : '.')}
                       </td>
                     ))}
                   </tr>
                   <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>N</td>
                     {rowItem.correlations?.map((c: any, cIdx: number) => (
-                      <td key={cIdx} style={{ fontSize: 11 }}>{c.n}</td>
+                      <td key={cIdx} style={{ fontSize: 11 }}>{c.n ?? '.'}</td>
                     ))}
                   </tr>
                 </React.Fragment>
@@ -1717,10 +1733,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               {data.descriptives?.map((d: any, i: number) => (
                 <tr key={i}>
                   <td className="align-left">{d.variable}</td>
-                  <td>{d.n}</td>
-                  <td>{d.mean}</td>
-                  <td>{d.std_dev}</td>
-                  <td>{d.se_mean}</td>
+                  <td>{d.n ?? '.'}</td>
+                  <td>{d.mean !== null && d.mean !== undefined ? d.mean : '.'}</td>
+                  <td>{d.std_dev !== null && d.std_dev !== undefined ? d.std_dev : '.'}</td>
+                  <td>{d.se_mean !== null && d.se_mean !== undefined ? d.se_mean : '.'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1749,12 +1765,17 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               {data.test_results?.map((t: any, i: number) => (
                 <tr key={i}>
                   <td className="align-left">{t.variable}</td>
-                  <td>{t.t}</td>
-                  <td>{t.df}</td>
-                  <td style={{ fontWeight: 700, color: t.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>{t.sig_2_tailed}</td>
-                  <td>{t.mean_difference}</td>
-                  <td>{t.ci_lower}</td>
-                  <td>{t.ci_upper}</td>
+                  <td>{t.t !== null && t.t !== undefined ? t.t : '.'}</td>
+                  <td>{t.df !== null && t.df !== undefined ? t.df : '.'}</td>
+                  <td style={{
+                    fontWeight: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 700 : 400,
+                    color: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                  }}>
+                    {t.sig_2_tailed !== null && t.sig_2_tailed !== undefined ? (t.sig_2_tailed === 0 ? '.000' : t.sig_2_tailed) : '.'}
+                  </td>
+                  <td>{t.mean_difference !== null && t.mean_difference !== undefined ? t.mean_difference : '.'}</td>
+                  <td>{t.ci_lower !== null && t.ci_lower !== undefined ? t.ci_lower : '.'}</td>
+                  <td>{t.ci_upper !== null && t.ci_upper !== undefined ? t.ci_upper : '.'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1784,10 +1805,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <tr key={i}>
                   <td className="align-left">{g.variable}</td>
                   <td className="align-left">{g.group}</td>
-                  <td>{g.n}</td>
-                  <td>{g.mean}</td>
-                  <td>{g.std_dev}</td>
-                  <td>{g.se_mean}</td>
+                  <td>{g.n ?? '.'}</td>
+                  <td>{g.mean !== null && g.mean !== undefined ? g.mean : '.'}</td>
+                  <td>{g.std_dev !== null && g.std_dev !== undefined ? g.std_dev : '.'}</td>
+                  <td>{g.se_mean !== null && g.se_mean !== undefined ? g.se_mean : '.'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1822,31 +1843,41 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <tr>
                     <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>{t.variable}</td>
                     <td className="align-left" style={{ fontWeight: 500 }}>Equal variances assumed</td>
-                    <td>{t.levene_f}</td>
-                    <td>{t.levene_sig}</td>
-                    <td>{t.equal_var_assumed?.t}</td>
-                    <td>{t.equal_var_assumed?.df}</td>
-                    <td style={{ fontWeight: 700, color: t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                      {t.equal_var_assumed?.sig_2_tailed}
+                    <td>{t.levene_f !== null && t.levene_f !== undefined ? t.levene_f : '.'}</td>
+                    <td>{t.levene_sig !== null && t.levene_sig !== undefined ? (t.levene_sig === 0 ? '.000' : t.levene_sig) : '.'}</td>
+                    <td>{t.equal_var_assumed?.t !== null && t.equal_var_assumed?.t !== undefined ? t.equal_var_assumed.t : '.'}</td>
+                    <td>{t.equal_var_assumed?.df !== null && t.equal_var_assumed?.df !== undefined ? t.equal_var_assumed.df : '.'}</td>
+                    <td style={{
+                      fontWeight: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
+                      color: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                    }}>
+                      {t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed !== undefined
+                        ? (t.equal_var_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_assumed.sig_2_tailed)
+                        : '.'}
                     </td>
-                    <td>{t.equal_var_assumed?.mean_diff}</td>
-                    <td>{t.equal_var_assumed?.se_diff}</td>
-                    <td>{t.equal_var_assumed?.ci_lower}</td>
-                    <td>{t.equal_var_assumed?.ci_upper}</td>
+                    <td>{t.equal_var_assumed?.mean_diff !== null && t.equal_var_assumed?.mean_diff !== undefined ? t.equal_var_assumed.mean_diff : '.'}</td>
+                    <td>{t.equal_var_assumed?.se_diff !== null && t.equal_var_assumed?.se_diff !== undefined ? t.equal_var_assumed.se_diff : '.'}</td>
+                    <td>{t.equal_var_assumed?.ci_lower !== null && t.equal_var_assumed?.ci_lower !== undefined ? t.equal_var_assumed.ci_lower : '.'}</td>
+                    <td>{t.equal_var_assumed?.ci_upper !== null && t.equal_var_assumed?.ci_upper !== undefined ? t.equal_var_assumed.ci_upper : '.'}</td>
                   </tr>
                   <tr>
                     <td className="align-left" style={{ color: 'var(--text-muted)' }}>Equal variances not assumed</td>
-                    <td>-</td>
-                    <td>-</td>
-                    <td>{t.equal_var_not_assumed?.t}</td>
-                    <td>{t.equal_var_not_assumed?.df}</td>
-                    <td style={{ fontWeight: 700, color: t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                      {t.equal_var_not_assumed?.sig_2_tailed}
+                    <td>.</td>
+                    <td>.</td>
+                    <td>{t.equal_var_not_assumed?.t !== null && t.equal_var_not_assumed?.t !== undefined ? t.equal_var_not_assumed.t : '.'}</td>
+                    <td>{t.equal_var_not_assumed?.df !== null && t.equal_var_not_assumed?.df !== undefined ? t.equal_var_not_assumed.df : '.'}</td>
+                    <td style={{
+                      fontWeight: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
+                      color: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                    }}>
+                      {t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed !== undefined
+                        ? (t.equal_var_not_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_not_assumed.sig_2_tailed)
+                        : '.'}
                     </td>
-                    <td>{t.equal_var_not_assumed?.mean_diff}</td>
-                    <td>{t.equal_var_not_assumed?.se_diff}</td>
-                    <td>{t.equal_var_not_assumed?.ci_lower}</td>
-                    <td>{t.equal_var_not_assumed?.ci_upper}</td>
+                    <td>{t.equal_var_not_assumed?.mean_diff !== null && t.equal_var_not_assumed?.mean_diff !== undefined ? t.equal_var_not_assumed.mean_diff : '.'}</td>
+                    <td>{t.equal_var_not_assumed?.se_diff !== null && t.equal_var_not_assumed?.se_diff !== undefined ? t.equal_var_not_assumed.se_diff : '.'}</td>
+                    <td>{t.equal_var_not_assumed?.ci_lower !== null && t.equal_var_not_assumed?.ci_lower !== undefined ? t.equal_var_not_assumed.ci_lower : '.'}</td>
+                    <td>{t.equal_var_not_assumed?.ci_upper !== null && t.equal_var_not_assumed?.ci_upper !== undefined ? t.equal_var_not_assumed.ci_upper : '.'}</td>
                   </tr>
                 </React.Fragment>
               ))}
@@ -1883,10 +1914,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       </td>
                     ) : null}
                     <td className="align-left">{stat.variable}</td>
-                    <td>{stat.mean}</td>
-                    <td>{stat.n}</td>
-                    <td>{stat.std_dev}</td>
-                    <td>{stat.se_mean}</td>
+                    <td>{stat.mean !== null && stat.mean !== undefined ? stat.mean : '.'}</td>
+                    <td>{stat.n ?? '.'}</td>
+                    <td>{stat.std_dev !== null && stat.std_dev !== undefined ? stat.std_dev : '.'}</td>
+                    <td>{stat.se_mean !== null && stat.se_mean !== undefined ? stat.se_mean : '.'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1910,10 +1941,13 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   {data.paired_correlations.map((c: any, i: number) => (
                     <tr key={i}>
                       <td className="align-left" style={{ fontWeight: 600 }}>{c.pair}</td>
-                      <td>{c.n}</td>
-                      <td>{c.correlation}</td>
-                      <td style={{ fontWeight: c.sig < 0.05 ? 700 : 400, color: c.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                        {c.sig}
+                      <td>{c.n ?? '.'}</td>
+                      <td>{c.correlation !== null && c.correlation !== undefined ? c.correlation : '.'}</td>
+                      <td style={{
+                        fontWeight: c.sig !== null && c.sig < 0.05 ? 700 : 400,
+                        color: c.sig !== null && c.sig < 0.05 ? 'var(--accent)' : 'inherit',
+                      }}>
+                        {c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.'}
                       </td>
                     </tr>
                   ))}
@@ -1949,15 +1983,18 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 {data.paired_differences?.map((d: any, i: number) => (
                   <tr key={i}>
                     <td className="align-left" style={{ fontWeight: 600 }}>{d.pair}</td>
-                    <td>{d.mean}</td>
-                    <td>{d.std_dev}</td>
-                    <td>{d.se_mean}</td>
-                    <td>{d.ci_lower}</td>
-                    <td>{d.ci_upper}</td>
-                    <td style={{ fontWeight: 700 }}>{d.t}</td>
-                    <td>{d.df}</td>
-                    <td style={{ fontWeight: 700, color: d.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                      {d.sig_2_tailed}
+                    <td>{d.mean !== null && d.mean !== undefined ? d.mean : '.'}</td>
+                    <td>{d.std_dev !== null && d.std_dev !== undefined ? d.std_dev : '.'}</td>
+                    <td>{d.se_mean !== null && d.se_mean !== undefined ? d.se_mean : '.'}</td>
+                    <td>{d.ci_lower !== null && d.ci_lower !== undefined ? d.ci_lower : '.'}</td>
+                    <td>{d.ci_upper !== null && d.ci_upper !== undefined ? d.ci_upper : '.'}</td>
+                    <td style={{ fontWeight: 700 }}>{d.t !== null && d.t !== undefined ? d.t : '.'}</td>
+                    <td>{d.df !== null && d.df !== undefined ? d.df : '.'}</td>
+                    <td style={{
+                      fontWeight: d.sig_2_tailed !== null && d.sig_2_tailed < 0.05 ? 700 : 400,
+                      color: d.sig_2_tailed !== null && d.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                    }}>
+                      {d.sig_2_tailed !== null && d.sig_2_tailed !== undefined ? (d.sig_2_tailed === 0 ? '.000' : d.sig_2_tailed) : '.'}
                     </td>
                   </tr>
                 ))}

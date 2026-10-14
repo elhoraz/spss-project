@@ -1327,9 +1327,9 @@ export function computeKolmogorovSmirnovLilliefors(values: number[]): { statisti
  * Exact Levene's Test based on absolute deviations from group means.
  * Matches IBM SPSS Statistics default Levene's test in T-Test and One-Way ANOVA.
  */
-export function computeLeveneTest(groups: number[][]): { f: number; df1: number; df2: number; sig: number } {
+export function computeLeveneTest(groups: number[][]): { f: number | null; df1: number | null; df2: number | null; sig: number | null } {
   const k = groups.length;
-  if (k < 2) return { f: 0, df1: 1, df2: 1, sig: 1.0 };
+  if (k < 2) return { f: null, df1: null, df2: null, sig: null };
 
   const groupMeans = groups.map((g) => (g.length > 0 ? g.reduce((a, b) => a + b, 0) / g.length : 0));
 
@@ -1345,6 +1345,10 @@ export function computeLeveneTest(groups: number[][]): { f: number; df1: number;
     grandZSum += sum;
     return n > 0 ? sum / n : 0;
   });
+
+  if (totalN <= k) {
+    return { f: null, df1: k - 1, df2: 0, sig: null };
+  }
 
   const grandZMean = totalN > 0 ? grandZSum / totalN : 0;
 
@@ -1363,9 +1367,16 @@ export function computeLeveneTest(groups: number[][]): { f: number; df1: number;
   const df1 = k - 1;
   const df2 = totalN - k;
 
-  const msBetween = df1 > 0 ? ssBetween / df1 : 0;
-  const msWithin = df2 > 0 ? ssWithin / df2 : 1;
-  const f = msWithin > 0 ? msBetween / msWithin : 0;
+  if (df1 <= 0 || df2 <= 0 || (ssBetween === 0 && ssWithin === 0)) {
+    return { f: null, df1, df2, sig: null };
+  }
+
+  const msBetween = ssBetween / df1;
+  const msWithin = ssWithin / df2;
+  if (msWithin <= 0) {
+    return { f: null, df1, df2, sig: null };
+  }
+  const f = msBetween / msWithin;
   const sig = fDistPValue(f, df1, df2);
 
   return {

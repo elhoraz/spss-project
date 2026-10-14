@@ -17,6 +17,7 @@ import {
   computeLeveneTest,
   studentizedRangePValue,
 } from './statsMath';
+import { isMissingValue, isUserMissingValue, isSystemMissingValue } from './missingUtils';
 
 // Re-export core mathematical distributions for external consumers
 export { normalCdf, normalQuantile, studentTPValue, studentTCritical, chiSquarePValue, fDistPValue };
@@ -26,16 +27,22 @@ export { normalCdf, normalQuantile, studentTPValue, studentTCritical, chiSquareP
 export function clientComputeDescriptives(
   rows: Record<string, any>[],
   variables: string[],
-  weightVar?: string | null
+  weightVar?: string | null,
+  variablesMeta?: VariableMeta[]
 ): OutputItem {
   const resultRows = variables.map((varName) => {
+    const varMeta = variablesMeta?.find((v) => v.name === varName);
     const pairs = rows
       .map((r) => {
-        const v = parseFloat(r[varName]);
+        const raw = r[varName];
+        if (isMissingValue(raw, varMeta)) {
+          return null;
+        }
+        const v = parseFloat(raw);
         const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
         return { v, w };
       })
-      .filter((p) => !isNaN(p.v) && isFinite(p.v) && p.w > 0);
+      .filter((p): p is { v: number; w: number } => p !== null && !isNaN(p.v) && isFinite(p.v) && p.w > 0);
 
     const n = pairs.length;
     const validN = weightVar ? pairs.reduce((sum, p) => sum + p.w, 0) : n;
@@ -46,16 +53,16 @@ export function clientComputeDescriptives(
         variable: varName,
         valid_n: 0,
         missing_n: missing,
-        mean: 0,
-        se_mean: 0,
-        std_dev: 0,
-        variance: 0,
-        min: 0,
-        max: 0,
-        range: 0,
-        median: 0,
-        skewness: 0,
-        kurtosis: 0,
+        mean: null,
+        se_mean: null,
+        std_dev: null,
+        variance: null,
+        min: null,
+        max: null,
+        range: null,
+        median: null,
+        skewness: null,
+        kurtosis: null,
       };
     }
 
@@ -68,28 +75,38 @@ export function clientComputeDescriptives(
     const range = max - min;
     const median = n % 2 === 0 ? (sorted[n / 2 - 1].v + sorted[n / 2].v) / 2 : sorted[Math.floor(n / 2)].v;
 
-    let variance = 0;
+    let variance: number | null = null;
+    let stdDev: number | null = null;
+    let seMean: number | null = null;
     if (validN > 1) {
       const sqDiffSum = pairs.reduce((acc, p) => acc + p.w * Math.pow(p.v - mean, 2), 0);
       variance = sqDiffSum / (validN - 1);
-    }
-    const stdDev = Math.sqrt(variance);
-    const seMean = validN > 0 ? stdDev / Math.sqrt(validN) : 0;
-
-    // Skewness
-    let skewness = 0;
-    if (n > 2 && stdDev > 0) {
-      const m3 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean) / stdDev, 3), 0);
-      skewness = (validN / ((validN - 1) * (validN - 2))) * m3;
+      stdDev = Math.sqrt(variance);
+      seMean = stdDev / Math.sqrt(validN);
     }
 
-    // Kurtosis
-    let kurtosis = 0;
-    if (n > 3 && stdDev > 0) {
-      const m4 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean) / stdDev, 4), 0);
-      kurtosis =
-        ((validN * (validN + 1)) / ((validN - 1) * (validN - 2) * (validN - 3))) * m4 -
-        (3 * Math.pow(validN - 1, 2)) / ((validN - 2) * (validN - 3));
+    // Skewness & Std Error of Skewness
+    let skewness: number | null = null;
+    let seSkewness: number | null = null;
+    if (n > 2) {
+      seSkewness = Math.sqrt((6 * validN * (validN - 1)) / ((validN - 2) * (validN + 1) * (validN + 3)));
+      if (stdDev !== null && stdDev > 0) {
+        const m3 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean) / stdDev!, 3), 0);
+        skewness = (validN / ((validN - 1) * (validN - 2))) * m3;
+      }
+    }
+
+    // Kurtosis & Std Error of Kurtosis
+    let kurtosis: number | null = null;
+    let seKurtosis: number | null = null;
+    if (n > 3 && seSkewness !== null) {
+      seKurtosis = 2 * seSkewness * Math.sqrt((Math.pow(validN, 2) - 1) / ((validN - 3) * (validN + 5)));
+      if (stdDev !== null && stdDev > 0) {
+        const m4 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean) / stdDev!, 4), 0);
+        kurtosis =
+          ((validN * (validN + 1)) / ((validN - 1) * (validN - 2) * (validN - 3))) * m4 -
+          (3 * Math.pow(validN - 1, 2)) / ((validN - 2) * (validN - 3));
+      }
     }
 
     return {
@@ -97,17 +114,29 @@ export function clientComputeDescriptives(
       valid_n: Number(validN.toFixed(weightVar ? 2 : 0)),
       missing_n: missing,
       mean: Number(mean.toFixed(4)),
-      se_mean: Number(seMean.toFixed(4)),
+      se_mean: seMean !== null ? Number(seMean.toFixed(4)) : null,
       median: Number(median.toFixed(4)),
-      std_dev: Number(stdDev.toFixed(4)),
-      variance: Number(variance.toFixed(4)),
+      std_dev: stdDev !== null ? Number(stdDev.toFixed(4)) : null,
+      variance: variance !== null ? Number(variance.toFixed(4)) : null,
       range: Number(range.toFixed(4)),
       min: Number(min.toFixed(4)),
       max: Number(max.toFixed(4)),
-      skewness: Number(skewness.toFixed(4)),
-      kurtosis: Number(kurtosis.toFixed(4)),
+      skewness: skewness !== null ? Number(skewness.toFixed(4)) : null,
+      se_skewness: seSkewness !== null ? Number(seSkewness.toFixed(4)) : null,
+      kurtosis: kurtosis !== null ? Number(kurtosis.toFixed(4)) : null,
+      se_kurtosis: seKurtosis !== null ? Number(seKurtosis.toFixed(4)) : null,
     };
   });
+
+  const validNListwise = rows.filter((r) => {
+    return variables.every((varName) => {
+      const varMeta = variablesMeta?.find((v) => v.name === varName);
+      const raw = r[varName];
+      if (isMissingValue(raw, varMeta)) return false;
+      const v = parseFloat(raw);
+      return !isNaN(v) && isFinite(v);
+    });
+  }).reduce((acc, r) => acc + (weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1), 0);
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -121,6 +150,7 @@ export function clientComputeDescriptives(
       title: 'Descriptive Statistics',
       variables,
       rows: resultRows,
+      valid_n_listwise: Number(validNListwise.toFixed(weightVar ? 2 : 0)),
       weighted_by: weightVar || null,
     },
   };
@@ -131,58 +161,107 @@ export function clientComputeFrequencies(
   rows: Record<string, any>[],
   variables: string[],
   valueLabels: Record<string, Record<string, string>> = {},
-  weightVar?: string | null
+  weightVar?: string | null,
+  variablesMeta?: VariableMeta[]
 ): OutputItem {
   const tables = variables.map((varName) => {
-    const counts: Record<string, number> = {};
-    let missingCount = 0;
-    let validCount = 0;
+    const varMeta = variablesMeta?.find((v) => v.name === varName);
+    const mergedLabels: Record<string, string> = {
+      ...(varMeta?.values || {}),
+      ...(valueLabels[varName] || {}),
+    };
+
+    const validCounts: Record<string, number> = {};
+    const userMissingCounts: Record<string, number> = {};
+    let systemMissingCount = 0;
+    let totalValid = 0;
+    let totalUserMissing = 0;
 
     rows.forEach((r) => {
       const raw = r[varName];
       const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
       if (w <= 0) return;
-      if (raw === undefined || raw === null || String(raw).trim() === '' || String(raw).trim() === '.') {
-        missingCount += w;
+
+      if (isSystemMissingValue(raw)) {
+        systemMissingCount += w;
+      } else if (isUserMissingValue(raw, varMeta)) {
+        const strVal = String(raw).trim();
+        userMissingCounts[strVal] = (userMissingCounts[strVal] || 0) + w;
+        totalUserMissing += w;
       } else {
         const strVal = String(raw).trim();
-        counts[strVal] = (counts[strVal] || 0) + w;
-        validCount += w;
+        validCounts[strVal] = (validCounts[strVal] || 0) + w;
+        totalValid += w;
       }
     });
 
-    const sortedKeys = Object.keys(counts).sort((a, b) => {
-      const na = parseFloat(a);
-      const nb = parseFloat(b);
-      return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
-    });
+    const totalMissing = systemMissingCount + totalUserMissing;
+    const totalCount = totalValid + totalMissing;
 
+    const sortKeys = (keys: string[]) => {
+      return keys.sort((a, b) => {
+        const na = parseFloat(a);
+        const nb = parseFloat(b);
+        return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
+      });
+    };
+
+    const sortedValidKeys = sortKeys(Object.keys(validCounts));
     let cumPercent = 0;
-    const totalCount = validCount + missingCount;
-    const freqRows = sortedKeys.map((k) => {
-      const count = counts[k];
+    const freqRows = sortedValidKeys.map((k) => {
+      const count = validCounts[k];
       const pct = totalCount > 0 ? (count / totalCount) * 100 : 0;
-      const validPct = validCount > 0 ? (count / validCount) * 100 : 0;
-      cumPercent += validPct;
-
-      const label = valueLabels[varName]?.[k] || k;
+      const validPct = totalValid > 0 ? (count / totalValid) * 100 : null;
+      if (validPct !== null) {
+        cumPercent += validPct;
+      }
+      const label = mergedLabels[k] || k;
 
       return {
         value: k,
         label,
         frequency: Number(count.toFixed(weightVar ? 2 : 0)),
         percent: Number(pct.toFixed(1)),
-        valid_percent: Number(validPct.toFixed(1)),
-        cumulative_percent: Number(Math.min(100, cumPercent).toFixed(1)),
+        valid_percent: validPct !== null ? Number(validPct.toFixed(1)) : null,
+        cumulative_percent: validPct !== null ? Number(Math.min(100, cumPercent).toFixed(1)) : null,
       };
     });
 
+    const sortedUserMissingKeys = sortKeys(Object.keys(userMissingCounts));
+    const missingRows = sortedUserMissingKeys.map((k) => {
+      const count = userMissingCounts[k];
+      const pct = totalCount > 0 ? (count / totalCount) * 100 : 0;
+      const label = mergedLabels[k] || k;
+      return {
+        value: k,
+        label,
+        frequency: Number(count.toFixed(weightVar ? 2 : 0)),
+        percent: Number(pct.toFixed(1)),
+        is_user_missing: true,
+      };
+    });
+
+    if (systemMissingCount > 0) {
+      const pct = totalCount > 0 ? (systemMissingCount / totalCount) * 100 : 0;
+      missingRows.push({
+        value: '.',
+        label: 'System',
+        frequency: Number(systemMissingCount.toFixed(weightVar ? 2 : 0)),
+        percent: Number(pct.toFixed(1)),
+        is_user_missing: false,
+      });
+    }
+
     return {
       variable: varName,
-      total_valid: Number(validCount.toFixed(weightVar ? 2 : 0)),
-      total_missing: Number(missingCount.toFixed(weightVar ? 2 : 0)),
+      total_valid: Number(totalValid.toFixed(weightVar ? 2 : 0)),
+      total_missing: Number(totalMissing.toFixed(weightVar ? 2 : 0)),
       total: Number(totalCount.toFixed(weightVar ? 2 : 0)),
+      valid_percent_total: totalValid > 0 ? 100.0 : null,
+      valid_total_percent: totalCount > 0 ? Number(((totalValid / totalCount) * 100).toFixed(1)) : 0,
+      missing_total_percent: totalCount > 0 ? Number(((totalMissing / totalCount) * 100).toFixed(1)) : 0,
       rows: freqRows,
+      missing_rows: missingRows,
     };
   });
 
@@ -352,16 +431,50 @@ export function clientComputeCrosstabs(
 }
 
 // 4. CORRELATIONS
-export function clientComputeCorrelations(rows: Record<string, any>[], variables: string[]): OutputItem {
+export function clientComputeCorrelations(
+  rows: Record<string, any>[],
+  variables: string[],
+  variablesMeta?: VariableMeta[]
+): OutputItem {
+  let hasConstantVar = false;
+
   const matrix = variables.map((v1) => {
+    const meta1 = variablesMeta?.find((v) => v.name === v1);
     const correlations = variables.map((v2) => {
+      const meta2 = variablesMeta?.find((v) => v.name === v2);
+
       const validPairs = rows
-        .map((r) => [parseFloat(r[v1]), parseFloat(r[v2])])
-        .filter(([a, b]) => !isNaN(a) && !isNaN(b) && isFinite(a) && isFinite(b));
+        .map((r) => {
+          const raw1 = r[v1];
+          const raw2 = r[v2];
+          if (isMissingValue(raw1, meta1) || isMissingValue(raw2, meta2)) {
+            return null;
+          }
+          const a = parseFloat(raw1);
+          const b = parseFloat(raw2);
+          return [a, b];
+        })
+        .filter((p): p is [number, number] => p !== null && !isNaN(p[0]) && !isNaN(p[1]) && isFinite(p[0]) && isFinite(p[1]));
 
       const n = validPairs.length;
-      if (n < 3) {
-        return { var1: v1, var2: v2, coefficient: v1 === v2 ? 1.0 : 0, sig_2_tailed: 1.0, n, flag: '' };
+
+      // Diagonal (v1 === v2)
+      if (v1 === v2) {
+        if (n < 2) {
+          return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: false };
+        }
+        const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
+        const den1 = validPairs.reduce((acc, p) => acc + Math.pow(p[0] - mean1, 2), 0);
+        if (den1 === 0) {
+          hasConstantVar = true;
+          return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: true };
+        }
+        return { var1: v1, var2: v2, coefficient: 1.0, sig_2_tailed: null, n, flag: '', is_constant: false };
+      }
+
+      // Off-diagonal (v1 !== v2)
+      if (n < 2) {
+        return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: false };
       }
 
       const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
@@ -379,28 +492,50 @@ export function clientComputeCorrelations(rows: Record<string, any>[], variables
         den2 += dy * dy;
       });
 
-      const r = den1 > 0 && den2 > 0 ? num / Math.sqrt(den1 * den2) : 0;
-      const tStat = (n > 2 && Math.abs(r) < 1) ? (r * Math.sqrt(n - 2)) / Math.sqrt(1 - r * r) : 10;
-      const pVal = studentTPValue(tStat, n - 2);
+      if (den1 === 0 || den2 === 0) {
+        hasConstantVar = true;
+        return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: true };
+      }
 
+      let r = num / Math.sqrt(den1 * den2);
+      r = Math.max(-1.0, Math.min(1.0, r));
+
+      let pVal: number | null = null;
       let flag = '';
-      if (v1 !== v2) {
-        if (pVal < 0.01) flag = '**';
-        else if (pVal < 0.05) flag = '*';
+
+      if (n >= 3) {
+        if (Math.abs(r) >= 1.0 - 1e-12) {
+          pVal = 0.0;
+          flag = '**';
+        } else {
+          const tStat = (r * Math.sqrt(n - 2)) / Math.sqrt(1 - r * r);
+          pVal = studentTPValue(tStat, n - 2);
+          if (pVal < 0.01) flag = '**';
+          else if (pVal < 0.05) flag = '*';
+        }
       }
 
       return {
         var1: v1,
         var2: v2,
         coefficient: Number(r.toFixed(3)),
-        sig_2_tailed: Number(pVal.toFixed(4)),
+        sig_2_tailed: pVal !== null ? Number(pVal.toFixed(4)) : null,
         n,
         flag,
+        is_constant: false,
       };
     });
 
     return { variable: v1, correlations };
   });
+
+  const notes = [
+    '** Correlation is significant at the 0.01 level (2-tailed).',
+    '* Correlation is significant at the 0.05 level (2-tailed).',
+  ];
+  if (hasConstantVar) {
+    notes.push('c. Cannot be computed because at least one of the variables is constant.');
+  }
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -413,10 +548,7 @@ export function clientComputeCorrelations(rows: Record<string, any>[], variables
       method_label: 'Pearson Correlation',
       variables,
       matrix,
-      notes: [
-        '** Correlation is significant at the 0.01 level (2-tailed).',
-        '* Correlation is significant at the 0.05 level (2-tailed).',
-      ],
+      notes,
     },
   };
 }
@@ -426,38 +558,78 @@ export function clientComputeOneSampleTTest(
   rows: Record<string, any>[],
   variables: string[],
   testValue: number = 0,
-  weightVar?: string | null
+  weightVar?: string | null,
+  variablesMeta?: VariableMeta[]
 ): OutputItem {
   const descriptives: any[] = [];
   const testResults: any[] = [];
 
   variables.forEach((v) => {
+    const varMeta = variablesMeta?.find((meta) => meta.name === v);
     const pairs = rows
       .map((r) => {
-        const val = parseFloat(r[v]);
+        const raw = r[v];
+        if (isMissingValue(raw, varMeta)) return null;
+        const val = parseFloat(raw);
         const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
         return { val, w };
       })
-      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
+      .filter((p): p is { val: number; w: number } => p !== null && !isNaN(p.val) && isFinite(p.val) && p.w > 0);
 
     const n = pairs.length;
     const validN = weightVar ? pairs.reduce((sum, p) => sum + p.w, 0) : n;
-    if (n < 2 || validN <= 1) return;
+
+    if (n === 0 || validN === 0) {
+      descriptives.push({
+        variable: v,
+        n: 0,
+        mean: null,
+        std_dev: null,
+        se_mean: null,
+      });
+      testResults.push({
+        variable: v,
+        test_value: testValue,
+        t: null,
+        df: null,
+        sig_2_tailed: null,
+        mean_difference: null,
+        ci_lower: null,
+        ci_upper: null,
+        note: 'No valid cases found.',
+      });
+      return;
+    }
 
     const mean = pairs.reduce((sum, p) => sum + p.val * p.w, 0) / validN;
+
+    if (validN <= 1) {
+      descriptives.push({
+        variable: v,
+        n: Math.round(validN),
+        mean: Number(mean.toFixed(4)),
+        std_dev: null,
+        se_mean: null,
+      });
+      testResults.push({
+        variable: v,
+        test_value: testValue,
+        t: null,
+        df: null,
+        sig_2_tailed: null,
+        mean_difference: Number((mean - testValue).toFixed(4)),
+        ci_lower: null,
+        ci_upper: null,
+        note: 'Degrees of freedom is less than 1.',
+      });
+      return;
+    }
+
     const s2 = pairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - mean, 2), 0) / (validN - 1);
     const stdDev = Math.sqrt(s2);
     const seMean = stdDev / Math.sqrt(validN);
-
     const df = Math.round(validN - 1);
     const meanDiff = mean - testValue;
-    const t = seMean > 0 ? meanDiff / seMean : 0;
-    const pVal = studentTPValue(t, df);
-
-    // 95% CI
-    const tCrit = studentTCritical(df, 0.05);
-    const ciLower = meanDiff - tCrit * seMean;
-    const ciUpper = meanDiff + tCrit * seMean;
 
     descriptives.push({
       variable: v,
@@ -466,6 +638,27 @@ export function clientComputeOneSampleTTest(
       std_dev: Number(stdDev.toFixed(4)),
       se_mean: Number(seMean.toFixed(4)),
     });
+
+    if (stdDev === 0 || seMean === 0) {
+      testResults.push({
+        variable: v,
+        test_value: testValue,
+        t: null,
+        df,
+        sig_2_tailed: null,
+        mean_difference: Number(meanDiff.toFixed(4)),
+        ci_lower: null,
+        ci_upper: null,
+        note: 't cannot be computed because the standard deviation is 0.',
+      });
+      return;
+    }
+
+    const t = meanDiff / seMean;
+    const pVal = studentTPValue(t, df);
+    const tCrit = studentTCritical(df, 0.05);
+    const ciLower = meanDiff - tCrit * seMean;
+    const ciUpper = meanDiff + tCrit * seMean;
 
     testResults.push({
       variable: v,
@@ -497,87 +690,157 @@ export function clientComputeOneSampleTTest(
   };
 }
 
-// // 6. INDEPENDENT SAMPLES T-TEST
+// 6. INDEPENDENT SAMPLES T-TEST
 export function clientComputeIndependentTTest(
   rows: Record<string, any>[],
   testVars: string[],
   groupVar: string,
   g1Val?: any,
   g2Val?: any,
-  weightVar?: string | null
+  weightVar?: string | null,
+  variablesMeta?: VariableMeta[]
 ): OutputItem {
-  const distinctGroups = Array.from(new Set(rows.map((r) => r[groupVar]))).filter((x) => x !== undefined && x !== null);
-  const group1 = g1Val !== undefined ? g1Val : distinctGroups[0];
-  const group2 = g2Val !== undefined ? g2Val : distinctGroups[1];
+  const groupMeta = variablesMeta?.find((m) => m.name === groupVar);
+  const distinctGroups = Array.from(
+    new Set(
+      rows
+        .map((r) => r[groupVar])
+        .filter((x) => !isMissingValue(x, groupMeta))
+        .map((x) => String(x))
+    )
+  );
+
+  const group1 = g1Val !== undefined ? String(g1Val) : (distinctGroups[0] ?? '1');
+  const group2 = g2Val !== undefined ? String(g2Val) : (distinctGroups[1] ?? '2');
 
   const groupStats: any[] = [];
   const testResults: any[] = [];
 
   testVars.forEach((v) => {
-    const pairs1 = rows
-      .filter((r) => String(r[groupVar]) === String(group1))
-      .map((r) => ({ val: parseFloat(r[v]), w: weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1 }))
-      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
-    const pairs2 = rows
-      .filter((r) => String(r[groupVar]) === String(group2))
-      .map((r) => ({ val: parseFloat(r[v]), w: weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1 }))
-      .filter((p) => !isNaN(p.val) && isFinite(p.val) && p.w > 0);
+    const vMeta = variablesMeta?.find((m) => m.name === v);
+
+    const filterGroup = (grp: string) => {
+      return rows
+        .filter((r) => String(r[groupVar]) === grp && !isMissingValue(r[groupVar], groupMeta))
+        .map((r) => {
+          const raw = r[v];
+          if (isMissingValue(raw, vMeta)) return null;
+          const val = parseFloat(raw);
+          const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
+          return { val, w };
+        })
+        .filter((p): p is { val: number; w: number } => p !== null && !isNaN(p.val) && isFinite(p.val) && p.w > 0);
+    };
+
+    const pairs1 = filterGroup(group1);
+    const pairs2 = filterGroup(group2);
 
     const n1 = weightVar ? pairs1.reduce((sum, p) => sum + p.w, 0) : pairs1.length;
     const n2 = weightVar ? pairs2.reduce((sum, p) => sum + p.w, 0) : pairs2.length;
-    if (n1 < 2 || n2 < 2) return;
 
-    const m1 = pairs1.reduce((sum, p) => sum + p.val * p.w, 0) / n1;
-    const m2 = pairs2.reduce((sum, p) => sum + p.val * p.w, 0) / n2;
+    const m1 = n1 > 0 ? pairs1.reduce((sum, p) => sum + p.val * p.w, 0) / n1 : null;
+    const m2 = n2 > 0 ? pairs2.reduce((sum, p) => sum + p.val * p.w, 0) / n2 : null;
 
-    const s1 = Math.sqrt(pairs1.reduce((acc, p) => acc + p.w * Math.pow(p.val - m1, 2), 0) / (n1 - 1));
-    const s2 = Math.sqrt(pairs2.reduce((acc, p) => acc + p.w * Math.pow(p.val - m2, 2), 0) / (n2 - 1));
+    const s1 = n1 > 1 && m1 !== null ? Math.sqrt(pairs1.reduce((acc, p) => acc + p.w * Math.pow(p.val - m1, 2), 0) / (n1 - 1)) : null;
+    const s2 = n2 > 1 && m2 !== null ? Math.sqrt(pairs2.reduce((acc, p) => acc + p.w * Math.pow(p.val - m2, 2), 0) / (n2 - 1)) : null;
 
-    const se1 = s1 / Math.sqrt(n1);
-    const se2 = s2 / Math.sqrt(n2);
+    const se1 = s1 !== null ? s1 / Math.sqrt(n1) : null;
+    const se2 = s2 !== null ? s2 / Math.sqrt(n2) : null;
 
     groupStats.push(
-      { variable: v, group: String(group1), n: Math.round(n1), mean: Number(m1.toFixed(4)), std_dev: Number(s1.toFixed(4)), se_mean: Number(se1.toFixed(4)) },
-      { variable: v, group: String(group2), n: Math.round(n2), mean: Number(m2.toFixed(4)), std_dev: Number(s2.toFixed(4)), se_mean: Number(se2.toFixed(4)) }
+      { variable: v, group: group1, n: Math.round(n1), mean: m1 !== null ? Number(m1.toFixed(4)) : null, std_dev: s1 !== null ? Number(s1.toFixed(4)) : null, se_mean: se1 !== null ? Number(se1.toFixed(4)) : null },
+      { variable: v, group: group2, n: Math.round(n2), mean: m2 !== null ? Number(m2.toFixed(4)) : null, std_dev: s2 !== null ? Number(s2.toFixed(4)) : null, se_mean: se2 !== null ? Number(se2.toFixed(4)) : null }
     );
 
-    // Real Levene's Test (ANOVA on absolute deviations from group mean)
+    if (n1 < 2 || n2 < 2 || m1 === null || m2 === null || s1 === null || s2 === null) {
+      testResults.push({
+        variable: v,
+        levene_f: null,
+        levene_sig: null,
+        equal_var_assumed: {
+          t: null,
+          df: null,
+          sig_2_tailed: null,
+          mean_diff: m1 !== null && m2 !== null ? Number((m1 - m2).toFixed(4)) : null,
+          se_diff: null,
+          ci_lower: null,
+          ci_upper: null,
+        },
+        equal_var_not_assumed: {
+          t: null,
+          df: null,
+          sig_2_tailed: null,
+          mean_diff: m1 !== null && m2 !== null ? Number((m1 - m2).toFixed(4)) : null,
+          se_diff: null,
+          ci_lower: null,
+          ci_upper: null,
+        },
+      });
+      return;
+    }
+
+    // Levene's Test
     const rawGroup1 = pairs1.map((p) => p.val);
     const rawGroup2 = pairs2.map((p) => p.val);
     const levene = computeLeveneTest([rawGroup1, rawGroup2]);
 
+    const meanDiff = m1 - m2;
+    const dfPooled = Math.round(n1 + n2 - 2);
+
     // Pooled variance (Equal Variances Assumed)
     const sp2 = (((n1 - 1) * s1 * s1) + ((n2 - 1) * s2 * s2)) / (n1 + n2 - 2);
     const seDiff = Math.sqrt(sp2 * (1 / n1 + 1 / n2));
-    const df = Math.round(n1 + n2 - 2);
-    const meanDiff = m1 - m2;
-    const t = seDiff > 0 ? meanDiff / seDiff : 0;
-    const pVal = studentTPValue(t, df);
-    const tCrit = studentTCritical(df, 0.05);
 
-    // Welch-Satterthwaite (Equal Variances Not Assumed)
-    const var1 = (s1 * s1) / n1;
-    const var2 = (s2 * s2) / n2;
-    const seWelch = Math.sqrt(var1 + var2);
-    const tWelch = seWelch > 0 ? meanDiff / seWelch : 0;
-    const dfWelch = Math.pow(var1 + var2, 2) / (Math.pow(var1, 2) / (n1 - 1) + Math.pow(var2, 2) / (n2 - 1));
-    const pWelch = studentTPValue(tWelch, dfWelch);
-    const tCritWelch = studentTCritical(dfWelch, 0.05);
-
-    testResults.push({
-      variable: v,
-      levene_f: levene.f,
-      levene_sig: levene.sig,
-      equal_var_assumed: {
+    let eqAssumed: any;
+    if (seDiff === 0) {
+      eqAssumed = {
+        t: null,
+        df: dfPooled,
+        sig_2_tailed: null,
+        mean_diff: Number(meanDiff.toFixed(4)),
+        se_diff: 0,
+        ci_lower: null,
+        ci_upper: null,
+        note: 't cannot be computed because standard deviation of both groups is 0.',
+      };
+    } else {
+      const t = meanDiff / seDiff;
+      const pVal = studentTPValue(t, dfPooled);
+      const tCrit = studentTCritical(dfPooled, 0.05);
+      eqAssumed = {
         t: Number(t.toFixed(3)),
-        df,
+        df: dfPooled,
         sig_2_tailed: Number(pVal.toFixed(4)),
         mean_diff: Number(meanDiff.toFixed(4)),
         se_diff: Number(seDiff.toFixed(4)),
         ci_lower: Number((meanDiff - tCrit * seDiff).toFixed(4)),
         ci_upper: Number((meanDiff + tCrit * seDiff).toFixed(4)),
-      },
-      equal_var_not_assumed: {
+      };
+    }
+
+    // Welch-Satterthwaite (Equal Variances Not Assumed)
+    const var1 = (s1 * s1) / n1;
+    const var2 = (s2 * s2) / n2;
+    const seWelch = Math.sqrt(var1 + var2);
+
+    let eqNotAssumed: any;
+    if (seWelch === 0) {
+      eqNotAssumed = {
+        t: null,
+        df: null,
+        sig_2_tailed: null,
+        mean_diff: Number(meanDiff.toFixed(4)),
+        se_diff: 0,
+        ci_lower: null,
+        ci_upper: null,
+      };
+    } else {
+      const denWelch = (Math.pow(var1, 2) / (n1 - 1)) + (Math.pow(var2, 2) / (n2 - 1));
+      const dfWelch = denWelch > 0 ? Math.pow(var1 + var2, 2) / denWelch : (var1 > 0 ? n1 - 1 : n2 - 1);
+      const tWelch = meanDiff / seWelch;
+      const pWelch = studentTPValue(tWelch, dfWelch);
+      const tCritWelch = studentTCritical(dfWelch, 0.05);
+      eqNotAssumed = {
         t: Number(tWelch.toFixed(3)),
         df: Number(dfWelch.toFixed(3)),
         sig_2_tailed: Number(pWelch.toFixed(4)),
@@ -585,7 +848,15 @@ export function clientComputeIndependentTTest(
         se_diff: Number(seWelch.toFixed(4)),
         ci_lower: Number((meanDiff - tCritWelch * seWelch).toFixed(4)),
         ci_upper: Number((meanDiff + tCritWelch * seWelch).toFixed(4)),
-      },
+      };
+    }
+
+    testResults.push({
+      variable: v,
+      levene_f: levene.f,
+      levene_sig: levene.sig,
+      equal_var_assumed: eqAssumed,
+      equal_var_not_assumed: eqNotAssumed,
     });
   });
 
@@ -600,8 +871,8 @@ export function clientComputeIndependentTTest(
     data: {
       title: 'Independent Samples Test',
       group_variable: groupVar,
-      group1: String(group1),
-      group2: String(group2),
+      group1,
+      group2,
       group_statistics: groupStats,
       test_results: testResults,
       weighted_by: weightVar || null,
@@ -610,25 +881,80 @@ export function clientComputeIndependentTTest(
 }
 
 // 6.5. PAIRED SAMPLES T-TEST
-export function clientComputePairedTTest(rows: Record<string, any>[], pairs: [string, string][]): OutputItem {
+export function clientComputePairedTTest(
+  rows: Record<string, any>[],
+  pairs: [string, string][],
+  variablesMeta?: VariableMeta[]
+): OutputItem {
   const pairedStats: any[] = [];
   const pairedCorrs: any[] = [];
   const pairedDiffs: any[] = [];
 
   pairs.forEach(([v1, v2], idx) => {
+    const meta1 = variablesMeta?.find((m) => m.name === v1);
+    const meta2 = variablesMeta?.find((m) => m.name === v2);
+
     const validPairs = rows
-      .map((r) => [parseFloat(r[v1]), parseFloat(r[v2])])
-      .filter(([a, b]) => !isNaN(a) && !isNaN(b));
+      .map((r) => {
+        const raw1 = r[v1];
+        const raw2 = r[v2];
+        if (isMissingValue(raw1, meta1) || isMissingValue(raw2, meta2)) {
+          return null;
+        }
+        const a = parseFloat(raw1);
+        const b = parseFloat(raw2);
+        return [a, b];
+      })
+      .filter((p): p is [number, number] => p !== null && !isNaN(p[0]) && !isNaN(p[1]) && isFinite(p[0]) && isFinite(p[1]));
 
     const n = validPairs.length;
-    if (n < 2) return;
+    const pairLabel = `Pair ${idx + 1}: ${v1} - ${v2}`;
+
+    if (n === 0) {
+      pairedStats.push(
+        { pair: pairLabel, variable: v1, mean: null, n: 0, std_dev: null, se_mean: null },
+        { pair: pairLabel, variable: v2, mean: null, n: 0, std_dev: null, se_mean: null }
+      );
+      pairedCorrs.push({ pair: pairLabel, n: 0, correlation: null, sig: null });
+      pairedDiffs.push({
+        pair: pairLabel,
+        mean: null,
+        std_dev: null,
+        se_mean: null,
+        ci_lower: null,
+        ci_upper: null,
+        t: null,
+        df: null,
+        sig_2_tailed: null,
+      });
+      return;
+    }
 
     const m1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
     const m2 = validPairs.reduce((acc, p) => acc + p[1], 0) / n;
+
+    if (n < 2) {
+      pairedStats.push(
+        { pair: pairLabel, variable: v1, mean: Number(m1.toFixed(4)), n: 1, std_dev: null, se_mean: null },
+        { pair: pairLabel, variable: v2, mean: Number(m2.toFixed(4)), n: 1, std_dev: null, se_mean: null }
+      );
+      pairedCorrs.push({ pair: pairLabel, n: 1, correlation: null, sig: null });
+      pairedDiffs.push({
+        pair: pairLabel,
+        mean: Number((m1 - m2).toFixed(4)),
+        std_dev: null,
+        se_mean: null,
+        ci_lower: null,
+        ci_upper: null,
+        t: null,
+        df: null,
+        sig_2_tailed: null,
+      });
+      return;
+    }
+
     const s1 = Math.sqrt(validPairs.reduce((acc, p) => acc + Math.pow(p[0] - m1, 2), 0) / (n - 1));
     const s2 = Math.sqrt(validPairs.reduce((acc, p) => acc + Math.pow(p[1] - m2, 2), 0) / (n - 1));
-
-    const pairLabel = `Pair ${idx + 1}: ${v1} - ${v2}`;
 
     pairedStats.push(
       { pair: pairLabel, variable: v1, mean: Number(m1.toFixed(4)), n, std_dev: Number(s1.toFixed(4)), se_mean: Number((s1 / Math.sqrt(n)).toFixed(4)) },
@@ -636,41 +962,75 @@ export function clientComputePairedTTest(rows: Record<string, any>[], pairs: [st
     );
 
     // Paired correlation
-    let sumProd = 0;
-    for (let i = 0; i < n; i++) {
-      sumProd += (validPairs[i][0] - m1) * (validPairs[i][1] - m2);
+    if (s1 === 0 || s2 === 0) {
+      pairedCorrs.push({
+        pair: pairLabel,
+        n,
+        correlation: null,
+        sig: null,
+      });
+    } else {
+      let sumProd = 0;
+      for (let i = 0; i < n; i++) {
+        sumProd += (validPairs[i][0] - m1) * (validPairs[i][1] - m2);
+      }
+      let rVal = sumProd / ((n - 1) * s1 * s2);
+      rVal = Math.max(-1.0, Math.min(1.0, rVal));
+
+      let pCorr: number | null = null;
+      if (n >= 3) {
+        if (Math.abs(rVal) >= 1.0 - 1e-12) {
+          pCorr = 0.0;
+        } else {
+          const tCorr = (rVal * Math.sqrt(n - 2)) / Math.sqrt(1 - rVal * rVal);
+          pCorr = studentTPValue(tCorr, n - 2);
+        }
+      }
+
+      pairedCorrs.push({
+        pair: pairLabel,
+        n,
+        correlation: Number(rVal.toFixed(3)),
+        sig: pCorr !== null ? Number(pCorr.toFixed(3)) : null,
+      });
     }
-    const rVal = s1 > 0 && s2 > 0 ? sumProd / ((n - 1) * s1 * s2) : 0;
-    const tCorr = n > 2 && Math.abs(rVal) < 1 ? (rVal * Math.sqrt(n - 2)) / Math.sqrt(1 - rVal * rVal) : 0;
-    const pCorr = n > 2 ? studentTPValue(tCorr, n - 2) : 1.0;
 
-    pairedCorrs.push({
-      pair: pairLabel,
-      n,
-      correlation: Number(rVal.toFixed(3)),
-      sig: Number(pCorr.toFixed(3)),
-    });
-
+    // Paired Differences
     const diffs = validPairs.map((p) => p[0] - p[1]);
     const mDiff = diffs.reduce((a, b) => a + b, 0) / n;
     const sDiff = Math.sqrt(diffs.reduce((acc, d) => acc + Math.pow(d - mDiff, 2), 0) / (n - 1));
     const seDiff = sDiff / Math.sqrt(n);
     const df = n - 1;
-    const t = seDiff > 0 ? mDiff / seDiff : 0;
-    const pVal = studentTPValue(t, df);
-    const tCrit = studentTCritical(df, 0.05);
 
-    pairedDiffs.push({
-      pair: pairLabel,
-      mean: Number(mDiff.toFixed(4)),
-      std_dev: Number(sDiff.toFixed(4)),
-      se_mean: Number(seDiff.toFixed(4)),
-      ci_lower: Number((mDiff - tCrit * seDiff).toFixed(4)),
-      ci_upper: Number((mDiff + tCrit * seDiff).toFixed(4)),
-      t: Number(t.toFixed(3)),
-      df,
-      sig_2_tailed: Number(pVal.toFixed(4)),
-    });
+    if (sDiff === 0 || seDiff === 0) {
+      pairedDiffs.push({
+        pair: pairLabel,
+        mean: Number(mDiff.toFixed(4)),
+        std_dev: 0,
+        se_mean: 0,
+        ci_lower: null,
+        ci_upper: null,
+        t: null,
+        df,
+        sig_2_tailed: null,
+      });
+    } else {
+      const t = mDiff / seDiff;
+      const pVal = studentTPValue(t, df);
+      const tCrit = studentTCritical(df, 0.05);
+
+      pairedDiffs.push({
+        pair: pairLabel,
+        mean: Number(mDiff.toFixed(4)),
+        std_dev: Number(sDiff.toFixed(4)),
+        se_mean: Number(seDiff.toFixed(4)),
+        ci_lower: Number((mDiff - tCrit * seDiff).toFixed(4)),
+        ci_upper: Number((mDiff + tCrit * seDiff).toFixed(4)),
+        t: Number(t.toFixed(3)),
+        df,
+        sig_2_tailed: Number(pVal.toFixed(4)),
+      });
+    }
   });
 
   return {
@@ -1352,7 +1712,7 @@ export function clientComputeTwoWayAnova(rows: Record<string, any>[], depVar: st
 }
 
 // 15. CLIENT SYNTAX RUNNER
-export function clientRunSyntax(syntaxText: string = '', rows: Record<string, any>[]): OutputItem[] {
+export function clientRunSyntax(syntaxText: string = '', rows: Record<string, any>[], variablesMeta?: VariableMeta[]): OutputItem[] {
   const outputs: OutputItem[] = [];
   const lines = syntaxText.split(/\.\s*(?:\r?\n|$)/);
 
@@ -1366,13 +1726,13 @@ export function clientRunSyntax(syntaxText: string = '', rows: Record<string, an
         const m = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i);
         if (m) {
           const vars = m[1].replace(/,/g, ' ').trim().split(/\s+/);
-          outputs.push(clientComputeFrequencies(rows, vars));
+          outputs.push(clientComputeFrequencies(rows, vars, {}, null, variablesMeta));
         }
       } else if (upper.startsWith('DESCRIPTIVES') || upper.startsWith('DESCRIPT')) {
         const m = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i);
         if (m) {
           const vars = m[1].replace(/,/g, ' ').trim().split(/\s+/);
-          outputs.push(clientComputeDescriptives(rows, vars));
+          outputs.push(clientComputeDescriptives(rows, vars, null, variablesMeta));
         }
       } else if (upper.startsWith('CROSSTABS')) {
         const m = cmd.match(/TABLES?\s*=\s*(\w+)\s+BY\s+(\w+)/i);
@@ -1383,7 +1743,7 @@ export function clientRunSyntax(syntaxText: string = '', rows: Record<string, an
         const m = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i);
         if (m) {
           const vars = m[1].replace(/,/g, ' ').trim().split(/\s+/);
-          outputs.push(clientComputeCorrelations(rows, vars));
+          outputs.push(clientComputeCorrelations(rows, vars, variablesMeta));
         }
       } else if (upper.startsWith('UNIANOVA')) {
         const m = cmd.match(/UNIANOVA\s+(\w+)\s+BY\s+(\w+)\s+(\w+)/i);
@@ -1407,14 +1767,17 @@ export function clientRunSyntax(syntaxText: string = '', rows: Record<string, an
         const testValM = cmd.match(/TESTVAL\s*=\s*([0-9\.\-]+)/i);
         const varM = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i);
         const grpM = cmd.match(/GROUPS?\s*=\s*(\w+)/i);
-        if (testValM && varM) {
+        const pairsM = cmd.match(/PAIRS?\s*=\s*(\w+)\s+WITH\s+(\w+)/i);
+        if (pairsM) {
+          outputs.push(clientComputePairedTTest(rows, [[pairsM[1], pairsM[2]]], variablesMeta));
+        } else if (testValM && varM) {
           const val = parseFloat(testValM[1]);
           const vars = varM[1].replace(/,/g, ' ').trim().split(/\s+/);
-          outputs.push(clientComputeOneSampleTTest(rows, vars, val));
+          outputs.push(clientComputeOneSampleTTest(rows, vars, val, null, variablesMeta));
         } else if (grpM && varM) {
           const gVar = grpM[1];
           const vars = varM[1].replace(/,/g, ' ').trim().split(/\s+/);
-          outputs.push(clientComputeIndependentTTest(rows, vars, gVar));
+          outputs.push(clientComputeIndependentTTest(rows, vars, gVar, undefined, undefined, null, variablesMeta));
         }
       } else if (upper.startsWith('RELIABILITY')) {
         const m = cmd.match(/VARIABLES?\s*=\s*([^/\.]+)/i);
