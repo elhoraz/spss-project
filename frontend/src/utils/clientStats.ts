@@ -1,46 +1,26 @@
 import { OutputItem, VariableMeta } from '../types/spss';
+import {
+  normalCdf,
+  normalQuantile,
+  studentTPValue,
+  studentTCritical,
+  chiSquarePValue,
+  fDistPValue,
+  matInv,
+  matDet,
+  jacobiEigenvalues,
+  fitOLS,
+  fitLogisticRegression,
+  varimaxRotation,
+  computeShapiroWilk,
+  computeKolmogorovSmirnovLilliefors,
+  computeLeveneTest,
+  studentizedRangePValue,
+} from './statsMath';
 
-// Helper: Statistical standard normal CDF approximation
-function normalCdf(x: number): number {
-  const t = 1 / (1 + 0.2316419 * Math.abs(x));
-  const d = 0.3989423 * Math.exp(-x * x / 2);
-  const prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-  return x > 0 ? 1 - prob : prob;
-}
+// Re-export core mathematical distributions for external consumers
+export { normalCdf, normalQuantile, studentTPValue, studentTCritical, chiSquarePValue, fDistPValue };
 
-// Helper: Student's t distribution two-tailed p-value approximation
-function studentTPValue(t: number, df: number): number {
-  if (df <= 0) return 1.0;
-  const absT = Math.abs(t);
-  // Normal approximation for large df or standard beta transform
-  if (df > 100) {
-    return Math.max(0.0001, (1 - normalCdf(absT)) * 2);
-  }
-  // Hill's approximation for moderate df
-  const x = df / (df + absT * absT);
-  // Incomplete beta function rough approximation
-  const p = 1 - normalCdf(absT * (1 - 1 / (4 * df)));
-  return Math.min(1.0, Math.max(0.0001, p * 2));
-}
-
-// Helper: Chi-Square p-value approximation (Wilson-Hilferty)
-function chiSquarePValue(chiSq: number, df: number): number {
-  if (df <= 0 || chiSq <= 0) return 1.0;
-  if (df === 1) {
-    return Math.min(1.0, (1 - normalCdf(Math.sqrt(chiSq))) * 2);
-  }
-  const s = Math.sqrt(2 / (9 * df));
-  const z = (Math.pow(chiSq / df, 1 / 3) - (1 - 2 / (9 * df))) / s;
-  return Math.min(1.0, Math.max(0.0001, 1 - normalCdf(z)));
-}
-
-// Helper: F-distribution p-value approximation
-function fDistPValue(f: number, df1: number, df2: number): number {
-  if (f <= 0 || df1 <= 0 || df2 <= 0) return 1.0;
-  const z = (Math.pow(f, 1 / 3) * (1 - 2 / (9 * df2)) - (1 - 2 / (9 * df1))) /
-            Math.sqrt(2 / (9 * df1) + Math.pow(f, 2 / 3) * (2 / (9 * df2)));
-  return Math.min(1.0, Math.max(0.0001, 1 - normalCdf(z)));
-}
 
 // 1. DESCRIPTIVES
 export function clientComputeDescriptives(
@@ -278,6 +258,63 @@ export function clientComputeCrosstabs(
   const df = (rowSet.length - 1) * (colSet.length - 1);
   const pVal = chiSquarePValue(chiSq, df);
 
+  // Likelihood Ratio Chi-Square G^2 = 2 * sum(O * ln(O / E))
+  let lrChiSq = 0;
+  for (let r = 0; r < rowSet.length; r++) {
+    for (let c = 0; c < colSet.length; c++) {
+      const o = countMatrix[r][c];
+      const e = (rowTotals[r] * colTotals[c]) / (grandTotal || 1);
+      if (o > 0 && e > 0) {
+        lrChiSq += 2 * o * Math.log(o / e);
+      }
+    }
+  }
+  const lrSig = chiSquarePValue(lrChiSq, df);
+
+  const chiTests: any[] = [
+    {
+      test: 'Pearson Chi-Square',
+      value: Number(chiSq.toFixed(3)),
+      df,
+      asymp_sig_2_sided: Number(pVal.toFixed(4)),
+    },
+  ];
+
+  // 2x2 specific tests: Continuity Correction & Fisher's Exact Test
+  if (rowSet.length === 2 && colSet.length === 2 && grandTotal > 0) {
+    const a = countMatrix[0][0];
+    const b = countMatrix[0][1];
+    const c = countMatrix[1][0];
+    const d = countMatrix[1][1];
+
+    // Yates' Continuity Correction
+    const numYates = Math.max(0, Math.abs(a * d - b * c) - grandTotal / 2);
+    const denYates = (a + b) * (c + d) * (a + c) * (b + d);
+    const yatesChiSq = denYates > 0 ? (grandTotal * numYates * numYates) / denYates : 0;
+    const yatesSig = chiSquarePValue(yatesChiSq, 1);
+
+    chiTests.push({
+      test: 'Continuity Correction',
+      value: Number(yatesChiSq.toFixed(3)),
+      df: 1,
+      asymp_sig_2_sided: Number(yatesSig.toFixed(4)),
+    });
+  }
+
+  chiTests.push({
+    test: 'Likelihood Ratio',
+    value: Number(lrChiSq.toFixed(3)),
+    df,
+    asymp_sig_2_sided: Number(lrSig.toFixed(4)),
+  });
+
+  chiTests.push({
+    test: 'N of Valid Cases',
+    value: grandTotal,
+    df: null,
+    asymp_sig_2_sided: null,
+  });
+
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
@@ -301,20 +338,7 @@ export function clientComputeCrosstabs(
       row_totals: rowTotals,
       col_totals: colTotals,
       grand_total: grandTotal,
-      chi_square_tests: [
-        {
-          test: 'Pearson Chi-Square',
-          value: Number(chiSq.toFixed(3)),
-          df,
-          asymp_sig_2_sided: Number(pVal.toFixed(4)),
-        },
-        {
-          test: 'N of Valid Cases',
-          value: grandTotal,
-          df: null,
-          asymp_sig_2_sided: null,
-        },
-      ],
+      chi_square_tests: chiTests,
     },
   };
 }
@@ -423,7 +447,7 @@ export function clientComputeOneSampleTTest(
     const pVal = studentTPValue(t, df);
 
     // 95% CI
-    const tCrit = 1.96; // asymptotic
+    const tCrit = studentTCritical(df, 0.05);
     const ciLower = meanDiff - tCrit * seMean;
     const ciUpper = meanDiff + tCrit * seMean;
 
@@ -509,38 +533,50 @@ export function clientComputeIndependentTTest(
       { variable: v, group: String(group2), n: Math.round(n2), mean: Number(m2.toFixed(4)), std_dev: Number(s2.toFixed(4)), se_mean: Number(se2.toFixed(4)) }
     );
 
-    // Pooled variance
+    // Real Levene's Test (ANOVA on absolute deviations from group mean)
+    const rawGroup1 = pairs1.map((p) => p.val);
+    const rawGroup2 = pairs2.map((p) => p.val);
+    const levene = computeLeveneTest([rawGroup1, rawGroup2]);
+
+    // Pooled variance (Equal Variances Assumed)
     const sp2 = (((n1 - 1) * s1 * s1) + ((n2 - 1) * s2 * s2)) / (n1 + n2 - 2);
     const seDiff = Math.sqrt(sp2 * (1 / n1 + 1 / n2));
     const df = Math.round(n1 + n2 - 2);
     const meanDiff = m1 - m2;
     const t = seDiff > 0 ? meanDiff / seDiff : 0;
     const pVal = studentTPValue(t, df);
+    const tCrit = studentTCritical(df, 0.05);
 
-    // Levene approximation
-    const fLevene = s1 > 0 && s2 > 0 ? Math.max(s1, s2) / Math.min(s1, s2) : 1;
+    // Welch-Satterthwaite (Equal Variances Not Assumed)
+    const var1 = (s1 * s1) / n1;
+    const var2 = (s2 * s2) / n2;
+    const seWelch = Math.sqrt(var1 + var2);
+    const tWelch = seWelch > 0 ? meanDiff / seWelch : 0;
+    const dfWelch = Math.pow(var1 + var2, 2) / (Math.pow(var1, 2) / (n1 - 1) + Math.pow(var2, 2) / (n2 - 1));
+    const pWelch = studentTPValue(tWelch, dfWelch);
+    const tCritWelch = studentTCritical(dfWelch, 0.05);
 
     testResults.push({
       variable: v,
-      levene_f: Number(fLevene.toFixed(3)),
-      levene_sig: Number((fLevene > 2.0 ? 0.04 : 0.45).toFixed(4)),
+      levene_f: levene.f,
+      levene_sig: levene.sig,
       equal_var_assumed: {
         t: Number(t.toFixed(3)),
         df,
         sig_2_tailed: Number(pVal.toFixed(4)),
         mean_diff: Number(meanDiff.toFixed(4)),
         se_diff: Number(seDiff.toFixed(4)),
-        ci_lower: Number((meanDiff - 1.96 * seDiff).toFixed(4)),
-        ci_upper: Number((meanDiff + 1.96 * seDiff).toFixed(4)),
+        ci_lower: Number((meanDiff - tCrit * seDiff).toFixed(4)),
+        ci_upper: Number((meanDiff + tCrit * seDiff).toFixed(4)),
       },
       equal_var_not_assumed: {
-        t: Number(t.toFixed(3)),
-        df: Number((df * 0.9).toFixed(1)),
-        sig_2_tailed: Number(pVal.toFixed(4)),
+        t: Number(tWelch.toFixed(3)),
+        df: Number(dfWelch.toFixed(3)),
+        sig_2_tailed: Number(pWelch.toFixed(4)),
         mean_diff: Number(meanDiff.toFixed(4)),
-        se_diff: Number(seDiff.toFixed(4)),
-        ci_lower: Number((meanDiff - 1.96 * seDiff).toFixed(4)),
-        ci_upper: Number((meanDiff + 1.96 * seDiff).toFixed(4)),
+        se_diff: Number(seWelch.toFixed(4)),
+        ci_lower: Number((meanDiff - tCritWelch * seWelch).toFixed(4)),
+        ci_upper: Number((meanDiff + tCritWelch * seWelch).toFixed(4)),
       },
     });
   });
@@ -591,6 +627,22 @@ export function clientComputePairedTTest(rows: Record<string, any>[], pairs: [st
       { pair: pairLabel, variable: v2, mean: Number(m2.toFixed(4)), n, std_dev: Number(s2.toFixed(4)), se_mean: Number((s2 / Math.sqrt(n)).toFixed(4)) }
     );
 
+    // Paired correlation
+    let sumProd = 0;
+    for (let i = 0; i < n; i++) {
+      sumProd += (validPairs[i][0] - m1) * (validPairs[i][1] - m2);
+    }
+    const rVal = s1 > 0 && s2 > 0 ? sumProd / ((n - 1) * s1 * s2) : 0;
+    const tCorr = n > 2 && Math.abs(rVal) < 1 ? (rVal * Math.sqrt(n - 2)) / Math.sqrt(1 - rVal * rVal) : 0;
+    const pCorr = n > 2 ? studentTPValue(tCorr, n - 2) : 1.0;
+
+    pairedCorrs.push({
+      pair: pairLabel,
+      n,
+      correlation: Number(rVal.toFixed(3)),
+      sig: Number(pCorr.toFixed(3)),
+    });
+
     const diffs = validPairs.map((p) => p[0] - p[1]);
     const mDiff = diffs.reduce((a, b) => a + b, 0) / n;
     const sDiff = Math.sqrt(diffs.reduce((acc, d) => acc + Math.pow(d - mDiff, 2), 0) / (n - 1));
@@ -598,14 +650,15 @@ export function clientComputePairedTTest(rows: Record<string, any>[], pairs: [st
     const df = n - 1;
     const t = seDiff > 0 ? mDiff / seDiff : 0;
     const pVal = studentTPValue(t, df);
+    const tCrit = studentTCritical(df, 0.05);
 
     pairedDiffs.push({
       pair: pairLabel,
       mean: Number(mDiff.toFixed(4)),
       std_dev: Number(sDiff.toFixed(4)),
       se_mean: Number(seDiff.toFixed(4)),
-      ci_lower: Number((mDiff - 1.96 * seDiff).toFixed(4)),
-      ci_upper: Number((mDiff + 1.96 * seDiff).toFixed(4)),
+      ci_lower: Number((mDiff - tCrit * seDiff).toFixed(4)),
+      ci_upper: Number((mDiff + tCrit * seDiff).toFixed(4)),
       t: Number(t.toFixed(3)),
       df,
       sig_2_tailed: Number(pVal.toFixed(4)),
@@ -664,20 +717,25 @@ export function clientComputeAnova(
     const se = n > 0 ? std / Math.sqrt(n) : 0;
     const rawVals = pairs.map((p) => p.val);
 
+    const tCrit = studentTCritical(Math.max(1, n - 1), 0.05);
     descriptives.push({
       group: key,
       n: Math.round(n),
       mean: Number(mean.toFixed(4)),
       std_dev: Number(std.toFixed(4)),
       se_mean: Number(se.toFixed(4)),
-      ci_lower: Number((mean - 1.96 * se).toFixed(4)),
-      ci_upper: Number((mean + 1.96 * se).toFixed(4)),
+      ci_lower: Number((mean - tCrit * se).toFixed(4)),
+      ci_upper: Number((mean + tCrit * se).toFixed(4)),
       min: Number(Math.min(...rawVals).toFixed(4)),
       max: Number(Math.max(...rawVals).toFixed(4)),
     });
   });
 
   const grandMean = totalN > 0 ? grandSum / totalN : 0;
+
+  // Real Levene's Test of Homogeneity of Variances
+  const rawGroups = groupKeys.map((key) => groups[key].map((p) => p.val));
+  const levene = computeLeveneTest(rawGroups);
 
   // Between & Within SS
   let ssBetween = 0;
@@ -698,8 +756,11 @@ export function clientComputeAnova(
   const fStat = msWithin > 0 ? msBetween / msWithin : 0;
   const pVal = fDistPValue(fStat, dfBetween, dfWithin);
 
-  // Post Hoc Tukey HSD
+  // Post Hoc Tukey HSD (Studentized Range Distribution)
   const postHoc: any[] = [];
+  const numPairs = (k * (k - 1)) / 2;
+  const tCritPair = studentTCritical(Math.max(1, dfWithin), 0.05 / Math.max(1, numPairs));
+
   for (let i = 0; i < k; i++) {
     for (let j = i + 1; j < k; j++) {
       const g1 = groupKeys[i];
@@ -710,8 +771,8 @@ export function clientComputeAnova(
       const n1 = descriptives[i].n;
       const n2 = descriptives[j].n;
       const sePair = Math.sqrt(msWithin * (1 / n1 + 1 / n2));
-      const tPair = sePair > 0 ? diff / sePair : 0;
-      const pAdj = Math.min(1.0, studentTPValue(tPair, dfWithin) * ((k * (k - 1)) / 2));
+      const q = sePair > 0 ? Math.abs(diff) / (sePair / Math.SQRT2) : 0;
+      const pAdj = studentizedRangePValue(q, k, dfWithin);
 
       postHoc.push({
         group_i: g1,
@@ -719,8 +780,8 @@ export function clientComputeAnova(
         mean_diff: Number(diff.toFixed(4)),
         se: Number(sePair.toFixed(4)),
         sig: Number(pAdj.toFixed(4)),
-        ci_lower: Number((diff - 1.96 * sePair).toFixed(4)),
-        ci_upper: Number((diff + 1.96 * sePair).toFixed(4)),
+        ci_lower: Number((diff - tCritPair * sePair).toFixed(4)),
+        ci_upper: Number((diff + tCritPair * sePair).toFixed(4)),
         significant: pAdj < 0.05,
       });
     }
@@ -740,6 +801,12 @@ export function clientComputeAnova(
       factor_variable: factorVar,
       descriptives,
       weighted_by: weightVar || null,
+      homogeneity_of_variances: {
+        levene_statistic: levene.f,
+        df1: levene.df1,
+        df2: levene.df2,
+        sig: levene.sig,
+      },
       anova_table: {
         between_groups: {
           sum_of_squares: Number(ssBetween.toFixed(3)),
@@ -769,7 +836,7 @@ export function clientComputeLinearRegression(
   depVar: string,
   indepVars: string[]
 ): OutputItem {
-  // Simple / Multiple Linear Regression
+  // Simple / Multiple Linear Regression using exact OLS Matrix Inversion
   const validRows = rows.filter((r) => {
     const yVal = parseFloat(r[depVar]);
     if (isNaN(yVal) || !isFinite(yVal)) return false;
@@ -782,83 +849,14 @@ export function clientComputeLinearRegression(
 
   const n = validRows.length;
   const k = indepVars.length;
-
-  const y = validRows.map((r) => parseFloat(r[depVar]));
-  const yMean = y.reduce((a, b) => a + b, 0) / n;
-  const ssTotal = y.reduce((acc, v) => acc + Math.pow(v - yMean, 2), 0);
-
-  // Simple univariate or bivariate estimate
-  const firstIv = indepVars[0];
-  const x = validRows.map((r) => parseFloat(r[firstIv]));
-  const xMean = x.reduce((a, b) => a + b, 0) / n;
-
-  let num = 0;
-  let den = 0;
-  for (let i = 0; i < n; i++) {
-    num += (x[i] - xMean) * (y[i] - yMean);
-    den += Math.pow(x[i] - xMean, 2);
+  if (n <= k + 1) {
+    throw new Error(`Insufficient observations for regression: have ${n} valid cases, need at least ${k + 2}.`);
   }
 
-  const b1 = den > 0 ? num / den : 0;
-  const b0 = yMean - b1 * xMean;
+  const y_data = validRows.map((r) => parseFloat(r[depVar]));
+  const X_data = validRows.map((r) => indepVars.map((iv) => parseFloat(r[iv])));
 
-  // Multiple predictors weighting (if multiple)
-  let ssResid = 0;
-  for (let i = 0; i < n; i++) {
-    const yHat = b0 + b1 * x[i];
-    ssResid += Math.pow(y[i] - yHat, 2);
-  }
-
-  const ssReg = Math.max(0, ssTotal - ssResid);
-  const r2 = ssTotal > 0 ? ssReg / ssTotal : 0;
-  const r = Math.sqrt(r2);
-  const dfReg = k;
-  const dfResid = Math.max(1, n - k - 1);
-  const adjR2 = 1 - ((1 - r2) * (n - 1)) / dfResid;
-  const msReg = ssReg / dfReg;
-  const msResid = ssResid / dfResid;
-  const fStat = msResid > 0 ? msReg / msResid : 0;
-  const pVal = fDistPValue(fStat, dfReg, dfResid);
-  const seEst = Math.sqrt(msResid);
-
-  const seB1 = den > 0 ? Math.sqrt(msResid / den) : 0;
-  const tB1 = seB1 > 0 ? b1 / seB1 : 0;
-  const pB1 = studentTPValue(tB1, dfResid);
-
-  const coefficients: any[] = [
-    {
-      term: '(Constant)',
-      b: Number(b0.toFixed(4)),
-      se: Number((seEst * 0.1).toFixed(4)),
-      beta: null,
-      t: Number((b0 / (seEst * 0.1 || 1)).toFixed(3)),
-      sig: 0.0001,
-      ci_lower: Number((b0 - 1.96 * seEst * 0.1).toFixed(4)),
-      ci_upper: Number((b0 + 1.96 * seEst * 0.1).toFixed(4)),
-      tolerance: null,
-      vif: null,
-    },
-  ];
-
-  indepVars.forEach((iv, idx) => {
-    const coeff = idx === 0 ? b1 : b1 * 0.45;
-    const seCoeff = idx === 0 ? seB1 : seB1 * 0.8;
-    const tCoeff = seCoeff > 0 ? coeff / seCoeff : 0;
-    const pCoeff = studentTPValue(tCoeff, dfResid);
-
-    coefficients.push({
-      term: iv,
-      b: Number(coeff.toFixed(4)),
-      se: Number(seCoeff.toFixed(4)),
-      beta: Number((r * (idx === 0 ? 0.85 : 0.35)).toFixed(3)),
-      t: Number(tCoeff.toFixed(3)),
-      sig: Number(pCoeff.toFixed(4)),
-      ci_lower: Number((coeff - 1.96 * seCoeff).toFixed(4)),
-      ci_upper: Number((coeff + 1.96 * seCoeff).toFixed(4)),
-      tolerance: 0.85,
-      vif: 1.18,
-    });
-  });
+  const ols = fitOLS(X_data, y_data, indepVars);
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -870,32 +868,9 @@ export function clientComputeLinearRegression(
       title: `Linear Regression: Dependent = ${depVar}`,
       dependent_variable: depVar,
       independent_variables: indepVars,
-      model_summary: {
-        r: Number(r.toFixed(3)),
-        r_squared: Number(r2.toFixed(3)),
-        adjusted_r_squared: Number(adjR2.toFixed(3)),
-        std_error_estimate: Number(seEst.toFixed(4)),
-        durbin_watson: 1.92,
-      },
-      anova: {
-        regression: {
-          sum_of_squares: Number(ssReg.toFixed(3)),
-          df: dfReg,
-          mean_square: Number(msReg.toFixed(3)),
-          f: Number(fStat.toFixed(3)),
-          sig: Number(pVal.toFixed(4)),
-        },
-        residual: {
-          sum_of_squares: Number(ssResid.toFixed(3)),
-          df: dfResid,
-          mean_square: Number(msResid.toFixed(3)),
-        },
-        total: {
-          sum_of_squares: Number(ssTotal.toFixed(3)),
-          df: n - 1,
-        },
-      },
-      coefficients,
+      model_summary: ols.model_summary,
+      anova: ols.anova,
+      coefficients: ols.coefficients,
     },
   };
 }
@@ -1562,11 +1537,12 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
         (3 * Math.pow(n - 1, 2)) / ((n - 2) * (n - 3));
     }
 
-    // Shapiro-Wilk & Kolmogorov-Smirnov test statistic approximation
-    const dStat = Math.min(0.25, Math.abs(skewness) * 0.06 + Math.abs(kurtosis) * 0.03 + 0.07);
-    const dSig = Math.max(0.001, Math.min(0.85, 1 - dStat * 3.5));
-    const swStat = Math.max(0.82, Math.min(0.99, 1 - Math.abs(skewness) * 0.04 - Math.abs(kurtosis) * 0.02));
-    const swSig = Math.max(0.001, Math.min(0.88, (swStat - 0.8) * 4));
+    // Real Shapiro-Wilk (Royston AS R94) & Kolmogorov-Smirnov with Lilliefors correction
+    const ks = computeKolmogorovSmirnovLilliefors(sorted);
+    const sw = computeShapiroWilk(sorted);
+
+    // Exact Student-t critical value for 95% CI
+    const tCrit = studentTCritical(n - 1, 0.05);
 
     // Extreme values
     const highest = sorted.slice(-5).reverse().map((v, i) => ({
@@ -1591,8 +1567,8 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
       descriptives: {
         mean: Number(mean.toFixed(4)),
         se_mean: Number(seMean.toFixed(4)),
-        ci_95_lower: Number((mean - 1.96 * seMean).toFixed(4)),
-        ci_95_upper: Number((mean + 1.96 * seMean).toFixed(4)),
+        ci_95_lower: Number((mean - tCrit * seMean).toFixed(4)),
+        ci_95_upper: Number((mean + tCrit * seMean).toFixed(4)),
         trimmed_mean_5pct: Number(trimmedMean.toFixed(4)),
         median: Number(median.toFixed(4)),
         variance: Number(variance.toFixed(4)),
@@ -1606,14 +1582,14 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
       },
       tests_of_normality: {
         kolmogorov_smirnov: {
-          statistic: Number(dStat.toFixed(3)),
+          statistic: ks.statistic,
           df: n,
-          sig: dSig < 0.001 ? '< .001' : Number(dSig.toFixed(4)),
+          sig: ks.sig < 0.001 ? '< .001' : ks.sig,
         },
         shapiro_wilk: {
-          statistic: Number(swStat.toFixed(3)),
+          statistic: sw.statistic,
           df: n,
-          sig: swSig < 0.001 ? '< .001' : Number(swSig.toFixed(4)),
+          sig: sw.sig < 0.001 ? '< .001' : sw.sig,
         },
       },
       extreme_values: {
@@ -1640,88 +1616,122 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
 // 16. FACTOR ANALYSIS (PCA & VARIMAX)
 export function clientComputeFactorAnalysis(rows: Record<string, any>[], variables: string[]): OutputItem {
   const p = variables.length;
-  const n = rows.length;
 
-  // Correlation matrix calculation
-  const matrix: number[][] = [];
-  const means: number[] = [];
-  const stds: number[] = [];
-
-  variables.forEach((v) => {
-    const vals = rows.map((r) => parseFloat(r[v])).filter((x) => !isNaN(x));
-    const m = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
-    const variance = vals.reduce((acc, x) => acc + Math.pow(x - m, 2), 0) / Math.max(1, vals.length - 1);
-    means.push(m);
-    stds.push(Math.sqrt(variance) || 1);
+  // Filter listwise valid rows
+  const validRows = rows.filter((r) => {
+    for (const v of variables) {
+      const val = parseFloat(r[v]);
+      if (isNaN(val) || !isFinite(val)) return false;
+    }
+    return true;
   });
 
-  for (let i = 0; i < p; i++) {
-    matrix[i] = [];
-    for (let j = 0; j < p; j++) {
-      if (i === j) {
-        matrix[i][j] = 1.0;
-      } else {
-        const vi = variables[i];
-        const vj = variables[j];
-        let sumProd = 0;
-        let validN = 0;
-        rows.forEach((r) => {
-          const xi = parseFloat(r[vi]);
-          const xj = parseFloat(r[vj]);
-          if (!isNaN(xi) && !isNaN(xj)) {
-            sumProd += (xi - means[i]) * (xj - means[j]);
-            validN++;
-          }
-        });
-        const rVal = validN > 1 ? sumProd / ((validN - 1) * stds[i] * stds[j]) : 0;
-        matrix[i][j] = Math.max(-1, Math.min(1, rVal));
+  const n = validRows.length;
+  if (n < p + 1) {
+    throw new Error(`Insufficient observations for Factor Analysis: have ${n} valid cases, need at least ${p + 1}.`);
+  }
+
+  // Calculate means and standard deviations
+  const means: number[] = variables.map(
+    (v) => validRows.reduce((acc, r) => acc + parseFloat(r[v]), 0) / n
+  );
+  const stds: number[] = variables.map((v, i) => {
+    const variance =
+      validRows.reduce((acc, r) => acc + Math.pow(parseFloat(r[v]) - means[i], 2), 0) / (n - 1);
+    return Math.sqrt(variance) || 1;
+  });
+
+  // Calculate Pearson correlation matrix R (p x p)
+  const R: number[][] = Array.from({ length: p }, (_, i) =>
+    Array.from({ length: p }, (_, j) => {
+      if (i === j) return 1.0;
+      let sumProd = 0;
+      for (const r of validRows) {
+        sumProd += (parseFloat(r[variables[i]]) - means[i]) * (parseFloat(r[variables[j]]) - means[j]);
+      }
+      const rVal = sumProd / ((n - 1) * stds[i] * stds[j]);
+      return Math.max(-1.0, Math.min(1.0, rVal));
+    })
+  );
+
+  // KMO (Kaiser-Meyer-Olkin) & Bartlett's Test of Sphericity
+  let kmoMeasure = 0.5;
+  const R_inv = matInv(R);
+  if (R_inv) {
+    let sumR2 = 0;
+    let sumA2 = 0;
+    for (let i = 0; i < p; i++) {
+      for (let j = 0; j < p; j++) {
+        if (i !== j) {
+          sumR2 += R[i][j] * R[i][j];
+          const aij = -R_inv[i][j] / Math.sqrt(Math.max(1e-12, R_inv[i][i] * R_inv[j][j]));
+          sumA2 += aij * aij;
+        }
       }
     }
+    kmoMeasure = sumR2 + sumA2 > 0 ? sumR2 / (sumR2 + sumA2) : 0.5;
   }
 
-  // Simulated power iteration for leading eigenvalues
-  const eigenvalues: number[] = [];
-  let remainingVar = p;
-  for (let k = 0; k < p; k++) {
-    const ev = k === 0 ? 1.8 + Math.random() * 0.4 : Math.max(0.2, (remainingVar / (p - k)) * 0.7);
-    eigenvalues.push(ev);
-    remainingVar -= ev;
-  }
-  eigenvalues.sort((a, b) => b - a);
+  const detR = Math.max(1e-20, matDet(R));
+  const bartlettChiSq = Math.max(0, -(n - 1 - (2 * p + 5) / 6) * Math.log(detR));
+  const bartlettDf = Math.floor((p * (p - 1)) / 2);
+  const bartlettSig = chiSquarePValue(bartlettChiSq, bartlettDf);
 
-  const totalVar = eigenvalues.reduce((a, b) => a + b, 0);
+  // Exact Jacobi Eigendecomposition of real symmetric correlation matrix
+  const { eigenvalues, eigenvectors } = jacobiEigenvalues(R);
+
+  const totalVar = p;
   let cumPct = 0;
   const varianceExplained = eigenvalues.map((ev, i) => {
-    const pct = (ev / totalVar) * 100;
+    const pct = (Math.max(0, ev) / totalVar) * 100;
     cumPct += pct;
     return {
       component: i + 1,
       eigenvalue: Number(ev.toFixed(3)),
       percent_of_variance: Number(pct.toFixed(2)),
-      cumulative_percent: Number(cumPct.toFixed(2)),
+      cumulative_percent: Number(Math.min(100, cumPct).toFixed(2)),
     };
   });
 
+  // Kaiser Criterion: Retain factors with eigenvalue >= 1.0 (at least 1)
   const selectedFactors = Math.max(1, eigenvalues.filter((ev) => ev >= 1.0).length);
 
-  const communalities = variables.map((v, i) => ({
-    variable: v,
-    initial: 1.0,
-    extraction: Number((0.65 + (i % 3) * 0.1).toFixed(3)),
-  }));
+  // Initial Unrotated Component Loadings matrix L (p x selectedFactors): L_ik = V_ik * sqrt(lambda_k)
+  const unrotatedLoadings: number[][] = Array.from({ length: p }, (_, i) =>
+    Array.from({ length: selectedFactors }, (_, k) => {
+      const lambda = Math.max(0, eigenvalues[k]);
+      return eigenvectors[i][k] * Math.sqrt(lambda);
+    })
+  );
 
+  // Communalities (Initial = 1.0, Extraction = sum of squared loadings across retained factors)
+  const communalities = variables.map((v, i) => {
+    let extraction = 0;
+    for (let k = 0; k < selectedFactors; k++) {
+      extraction += unrotatedLoadings[i][k] * unrotatedLoadings[i][k];
+    }
+    return {
+      variable: v,
+      initial: 1.0,
+      extraction: Number(Math.min(1.0, extraction).toFixed(3)),
+    };
+  });
+
+  // Component Matrix
   const componentMatrix = variables.map((v, i) => {
     const rowObj: Record<string, any> = { variable: v };
     for (let k = 0; k < selectedFactors; k++) {
-      rowObj[`Component ${k + 1}`] = Number((k === 0 ? 0.72 - i * 0.05 : 0.45 - i * 0.08).toFixed(3));
+      rowObj[`Component ${k + 1}`] = Number(unrotatedLoadings[i][k].toFixed(3));
     }
     return rowObj;
   });
 
+  // Real Kaiser Varimax Rotation
+  const { rotatedLoadings } = varimaxRotation(unrotatedLoadings);
   const rotatedMatrix = variables.map((v, i) => {
     const rowObj: Record<string, any> = { variable: v };
     for (let k = 0; k < selectedFactors; k++) {
-      rowObj[`Component ${k + 1}`] = Number((k === i % selectedFactors ? 0.84 : 0.18).toFixed(3));
+      rowObj[`Component ${k + 1}`] = Number(rotatedLoadings[i][k].toFixed(3));
     }
     return rowObj;
   });
@@ -1736,10 +1746,10 @@ export function clientComputeFactorAnalysis(rows: Record<string, any>[], variabl
       title: 'Factor Analysis (Principal Component Analysis)',
       variables,
       kmo_and_bartlett: {
-        kmo_measure: 0.742,
-        bartlett_approx_chi_square: Number((n * 2.8).toFixed(2)),
-        bartlett_df: Math.floor((p * (p - 1)) / 2),
-        bartlett_sig: '< .001',
+        kmo_measure: Number(kmoMeasure.toFixed(3)),
+        bartlett_approx_chi_square: Number(bartlettChiSq.toFixed(2)),
+        bartlett_df: bartlettDf,
+        bartlett_sig: bartlettSig < 0.001 ? '< .001' : Number(bartlettSig.toFixed(4)),
       },
       communalities,
       total_variance_explained: varianceExplained,
@@ -1755,45 +1765,30 @@ export function clientComputeLogisticRegression(
   depVar: string,
   covariates: string[]
 ): OutputItem {
-  const uniqueVals = Array.from(new Set(rows.map((r) => r[depVar]).filter((v) => v !== undefined && v !== null)));
-  const n = rows.length;
-
-  const encoding = [
-    { original_value: String(uniqueVals[0] ?? '0'), internal_value: 0 },
-    { original_value: String(uniqueVals[1] ?? '1'), internal_value: 1 },
-  ];
-
-  const equationRows = [
-    {
-      variable: 'Constant',
-      b: -1.245,
-      se: 0.428,
-      wald: 8.462,
-      df: 1,
-      sig: 0.0036,
-      exp_b: 0.288,
-      ci_lower: 0.124,
-      ci_upper: 0.667,
-    },
-  ];
-
-  covariates.forEach((cov, idx) => {
-    const b = 0.00008 * (idx + 1);
-    const se = 0.00002;
-    const wald = Math.pow(b / se, 2);
-    const expB = Math.exp(b);
-    equationRows.push({
-      variable: cov,
-      b: Number(b.toFixed(5)),
-      se: Number(se.toFixed(5)),
-      wald: Number(wald.toFixed(3)),
-      df: 1,
-      sig: 0.0012,
-      exp_b: Number(expB.toFixed(4)),
-      ci_lower: Number((expB * 0.98).toFixed(4)),
-      ci_upper: Number((expB * 1.02).toFixed(4)),
-    });
+  // Filter valid rows
+  const validRows = rows.filter((r) => {
+    if (r[depVar] === undefined || r[depVar] === null) return false;
+    for (const cov of covariates) {
+      const v = parseFloat(r[cov]);
+      if (isNaN(v) || !isFinite(v)) return false;
+    }
+    return true;
   });
+
+  const uniqueVals = Array.from(new Set(validRows.map((r) => String(r[depVar])))).sort();
+  if (uniqueVals.length !== 2) {
+    throw new Error(
+      `Binary Logistic Regression requires exactly 2 distinct classes in dependent variable '${depVar}', found ${uniqueVals.length}.`
+    );
+  }
+
+  const group0 = uniqueVals[0];
+  const group1 = uniqueVals[1];
+
+  const y_data = validRows.map((r) => (String(r[depVar]) === group1 ? 1 : 0));
+  const X_data = validRows.map((r) => covariates.map((cov) => parseFloat(r[cov])));
+
+  const logit = fitLogisticRegression(X_data, y_data, covariates, group0, group1);
 
   return {
     id: `logit_${Date.now()}`,
@@ -1805,29 +1800,14 @@ export function clientComputeLogisticRegression(
       title: 'Binary Logistic Regression',
       dependent_variable: depVar,
       covariates,
-      dependent_encoding: encoding,
-      omnibus_tests: {
-        chi_square: 24.815,
-        df: covariates.length,
-        sig: '< .001',
-      },
-      model_summary: {
-        minus_2_log_likelihood: 34.621,
-        cox_snell_r2: 0.462,
-        nagelkerke_r2: 0.617,
-      },
-      classification_table: {
-        group_0_label: String(uniqueVals[0] ?? '0'),
-        group_1_label: String(uniqueVals[1] ?? '1'),
-        n00: Math.floor(n * 0.42),
-        n01: Math.floor(n * 0.08),
-        n10: Math.floor(n * 0.06),
-        n11: Math.floor(n * 0.44),
-        percent_correct_0: 84.0,
-        percent_correct_1: 88.0,
-        overall_percent: 86.0,
-      },
-      variables_in_equation: equationRows,
+      dependent_encoding: [
+        { original_value: group0, internal_value: 0 },
+        { original_value: group1, internal_value: 1 },
+      ],
+      omnibus_tests: logit.omnibus_tests,
+      model_summary: logit.model_summary,
+      classification_table: logit.classification_table,
+      variables_in_equation: logit.variables_in_equation,
     },
   };
 }
@@ -1983,9 +1963,35 @@ export function clientComputePartialCorrelation(
   });
 
   // Calculate Partial Correlations for each pair in vars controlling for controlVars
-  const z = controlVars[0];
-  const n = rows.length;
-  const df = Math.max(1, n - 2 - controlVars.length);
+  // Filter complete valid rows across all vars and controlVars
+  const validRows = rows.filter((r) => {
+    for (const v of allVars) {
+      const val = parseFloat(r[v]);
+      if (isNaN(val) || !isFinite(val)) return false;
+    }
+    return true;
+  });
+
+  const n = validRows.length;
+  const pControls = controlVars.length;
+  const df = Math.max(1, n - 2 - pControls);
+
+  // If control variables exist, compute residuals of each variable regressed on controlVars
+  const varResiduals: Record<string, number[]> = {};
+  if (pControls > 0) {
+    const X_control = validRows.map((r) => controlVars.map((cv) => parseFloat(r[cv])));
+    vars.forEach((v) => {
+      const Y = validRows.map((r) => parseFloat(r[v]));
+      const fit = fitOLS(X_control, Y);
+      varResiduals[v] = Y.map((y, idx) => {
+        let pred = fit.coefficients[0].b;
+        for (let c = 0; c < pControls; c++) {
+          pred += fit.coefficients[1 + c].b * X_control[idx][c];
+        }
+        return y - pred;
+      });
+    });
+  }
 
   const partialRows: any[] = [];
   for (let i = 0; i < vars.length; i++) {
@@ -1997,12 +2003,27 @@ export function clientComputePartialCorrelation(
         continue;
       }
 
-      const r12 = zeroOrderMatrix[v1][v2];
-      const r1z = z ? zeroOrderMatrix[v1][z] : 0;
-      const r2z = z ? zeroOrderMatrix[v2][z] : 0;
-
-      const denom = Math.sqrt(Math.max(0.0001, (1 - r1z * r1z) * (1 - r2z * r2z)));
-      const partialR = Math.max(-1, Math.min(1, (r12 - r1z * r2z) / denom));
+      let partialR = 0;
+      if (pControls === 0) {
+        partialR = zeroOrderMatrix[v1][v2];
+      } else {
+        const res1 = varResiduals[v1];
+        const res2 = varResiduals[v2];
+        const mean1 = res1.reduce((a, b) => a + b, 0) / n;
+        const mean2 = res2.reduce((a, b) => a + b, 0) / n;
+        let num = 0;
+        let den1 = 0;
+        let den2 = 0;
+        for (let k = 0; k < n; k++) {
+          const d1 = res1[k] - mean1;
+          const d2 = res2[k] - mean2;
+          num += d1 * d2;
+          den1 += d1 * d1;
+          den2 += d2 * d2;
+        }
+        const denom = Math.sqrt(den1 * den2);
+        partialR = denom > 0 ? Math.max(-1, Math.min(1, num / denom)) : 0;
+      }
 
       const t = Math.abs(partialR) * Math.sqrt(df / Math.max(0.0001, 1 - partialR * partialR));
       const sig = studentTPValue(t, df);
@@ -2099,10 +2120,10 @@ export function clientComputeCurveEstimation(
     expFit = { ...rawExp, b0: Math.exp(rawExp.b0) };
   }
 
-  // Quadratic approximation
-  const quadR2 = Math.min(0.999, linear.r2 * 1.15 + 0.05);
-  const quadAdj = Math.max(0, 1 - ((1 - quadR2) * (n - 1)) / Math.max(1, n - 3));
-  const quadF = linear.f * 1.2;
+  // True Quadratic model: Y = b0 + b1*X + b2*X^2 via exact OLS
+  const quadX = valid.map((p) => [p.x, p.x * p.x]);
+  const quadY = valid.map((p) => p.y);
+  const quadOLS = fitOLS(quadX, quadY, ['X', 'X^2']);
 
   const models = [
     {
@@ -2131,16 +2152,16 @@ export function clientComputeCurveEstimation(
     },
     {
       model: 'Quadratic',
-      r_square: Number(quadR2.toFixed(4)),
-      adj_r_square: Number(quadAdj.toFixed(4)),
-      std_error: Number((linear.seEst * 0.92).toFixed(4)),
-      f: Number(quadF.toFixed(3)),
+      r_square: quadOLS.model_summary.r_squared,
+      adj_r_square: quadOLS.model_summary.adjusted_r_squared,
+      std_error: quadOLS.model_summary.std_error_estimate,
+      f: quadOLS.anova.regression.f,
       df1: 2,
-      df2: Math.max(1, n - 3),
-      sig: Number((linear.sig * 0.8).toFixed(4)),
-      b0: Number((linear.b0 * 0.95).toFixed(4)),
-      b1: Number((linear.b1 * 0.8).toFixed(4)),
-      b2: Number((linear.b1 * 0.01).toFixed(6)),
+      df2: quadOLS.anova.residual.df,
+      sig: quadOLS.anova.regression.sig,
+      b0: quadOLS.coefficients[0].b,
+      b1: quadOLS.coefficients[1].b,
+      b2: quadOLS.coefficients[2].b,
     },
     {
       model: 'Exponential',
@@ -2402,7 +2423,6 @@ export function clientComputeANCOVA(
   const ssTotal = validData.reduce((acc, d) => acc + Math.pow(d.y - meanY, 2), 0);
   const dfTotal = n - 1;
 
-  // Fit standard OLS with factor dummy indicators and covariates
   // Group statistics
   const groupStats = factorLevels.map((lvl) => {
     const grpData = validData.filter((d) => d.factor === lvl);
@@ -2415,69 +2435,116 @@ export function clientComputeANCOVA(
     return { level: lvl, n: grpCount, rawMean, stdDev };
   });
 
-  // Calculate Covariate slopes (b_c) using simple/multiple regression on pooled residuals
-  let pooledNum = 0;
-  let pooledDen = 0;
-  factorLevels.forEach((lvl) => {
-    const grp = validData.filter((d) => d.factor === lvl);
-    if (grp.length > 1) {
-      const gMeanY = grp.reduce((acc, d) => acc + d.y, 0) / grp.length;
-      const gMeanX = grp.reduce((acc, d) => acc + d.covs[0], 0) / grp.length;
-      grp.forEach((d) => {
-        pooledNum += (d.covs[0] - gMeanX) * (d.y - gMeanY);
-        pooledDen += Math.pow(d.covs[0] - gMeanX, 2);
-      });
-    }
-  });
-  const bCov = pooledDen > 0 ? pooledNum / pooledDen : 0;
-
-  // SS Error
-  let ssError = 0;
-  validData.forEach((d) => {
-    const grpStat = groupStats.find((g) => g.level === d.factor);
-    const pred = (grpStat?.rawMean || meanY) + bCov * (d.covs[0] - meanCovs[0]);
-    ssError += Math.pow(d.y - pred, 2);
-  });
+  // Construct Design Matrix for Full Model (Type III General Linear Model):
+  // Predictors: (k-1) dummy indicators for factor levels (first k-1 levels; last is reference)
+  // followed by the p covariates
   const p = covariateVars.length;
-  const dfError = Math.max(1, n - k - p);
-  const msError = ssError / dfError;
+  const X_full: number[][] = validData.map((d) => {
+    const row: number[] = [];
+    for (let i = 0; i < k - 1; i++) {
+      row.push(d.factor === factorLevels[i] ? 1 : 0);
+    }
+    for (let c = 0; c < p; c++) {
+      row.push(d.covs[c]);
+    }
+    return row;
+  });
+  const Y_vec: number[] = validData.map((d) => d.y);
 
-  // SS Model & SS Factor
-  const ssModel = Math.max(0, ssTotal - ssError);
-  const dfModel = k - 1 + p;
+  // Fit Full Model via OLS
+  const fullModel = fitOLS(X_full, Y_vec);
+  const dfModel = (k - 1) + p;
+  const dfError = Math.max(1, n - 1 - dfModel);
+  const ssModel = Math.max(0, fullModel.ssReg);
+  const ssError = Math.max(0, fullModel.ssResid);
   const msModel = dfModel > 0 ? ssModel / dfModel : 0;
+  const msError = dfError > 0 ? ssError / dfError : 0;
   const fModel = msError > 0 ? msModel / msError : 0;
   const sigModel = fDistPValue(fModel, dfModel, dfError);
 
-  // SS Covariate
-  const ssCov = Math.max(0, Math.min(ssModel * 0.45, Math.pow(bCov, 2) * pooledDen));
-  const msCov = ssCov / 1;
-  const fCov = msError > 0 ? msCov / msError : 0;
-  const sigCov = fDistPValue(fCov, 1, dfError);
-  const etaCov = (ssCov + ssError) > 0 ? ssCov / (ssCov + ssError) : 0;
-
-  // SS Factor (adjusted for covariate)
-  const ssFactor = Math.max(0, ssModel - ssCov);
+  // 1. Type III SS for Factor: Reduced model without factor dummies (only covariates)
+  const X_covs: number[][] = validData.map((d) => d.covs.slice());
+  const reducedModelNoFactor = fitOLS(X_covs, Y_vec);
+  const ssFactor = Math.max(0, reducedModelNoFactor.ssResid - ssError);
   const dfFactor = k - 1;
   const msFactor = dfFactor > 0 ? ssFactor / dfFactor : 0;
   const fFactor = msError > 0 ? msFactor / msError : 0;
   const sigFactor = fDistPValue(fFactor, dfFactor, dfError);
   const etaFactor = (ssFactor + ssError) > 0 ? ssFactor / (ssFactor + ssError) : 0;
 
-  // Adjusted Means (Estimated Marginal Means)
-  const adjustedMeans = groupStats.map((g) => {
-    const grpCovMean =
-      validData.filter((d) => d.factor === g.level).reduce((acc, d) => acc + d.covs[0], 0) / (g.n || 1);
-    const adjMean = g.rawMean - bCov * (grpCovMean - meanCovs[0]);
-    const se = Math.sqrt(msError * (1 / (g.n || 1) + Math.pow(grpCovMean - meanCovs[0], 2) / (pooledDen || 1)));
+  // 2. Type III SS for each Covariate: Reduced model without covariate c
+  const covariateTests = covariateVars.map((covName, cIdx) => {
+    const X_without_c: number[][] = validData.map((d) => {
+      const row: number[] = [];
+      for (let i = 0; i < k - 1; i++) {
+        row.push(d.factor === factorLevels[i] ? 1 : 0);
+      }
+      for (let c = 0; c < p; c++) {
+        if (c !== cIdx) row.push(d.covs[c]);
+      }
+      return row;
+    });
+    const reducedModelNoCov = fitOLS(X_without_c, Y_vec);
+    const ssCov_i = Math.max(0, reducedModelNoCov.ssResid - ssError);
+    const dfCov_i = 1;
+    const msCov_i = ssCov_i / dfCov_i;
+    const fCov_i = msError > 0 ? msCov_i / msError : 0;
+    const sigCov_i = fDistPValue(fCov_i, dfCov_i, dfError);
+    const etaCov_i = (ssCov_i + ssError) > 0 ? ssCov_i / (ssCov_i + ssError) : 0;
+    return {
+      source: covName,
+      ss: Number(ssCov_i.toFixed(3)),
+      df: dfCov_i,
+      ms: Number(msCov_i.toFixed(3)),
+      f: Number(fCov_i.toFixed(3)),
+      sig: Number(sigCov_i.toFixed(4)),
+      eta_sq: Number(etaCov_i.toFixed(3)),
+    };
+  });
+
+  // Estimated Marginal Means (Adjusted Means) evaluated at mean of each covariate
+  const tCrit = studentTCritical(dfError, 0.05);
+  const b0 = fullModel.coefficients[0].b;
+  const bDummies = fullModel.coefficients.slice(1, k).map((c) => c.b);
+  const bCovs = fullModel.coefficients.slice(k).map((c) => c.b);
+
+  const adjustedMeans = groupStats.map((g, gIdx) => {
+    // Prediction at overall covariate means
+    let adjMean = b0;
+    if (gIdx < k - 1) {
+      adjMean += bDummies[gIdx];
+    }
+    for (let c = 0; c < p; c++) {
+      adjMean += bCovs[c] * meanCovs[c];
+    }
+
+    // Variance of prediction = x0^T * covBeta * x0
+    let se = Math.sqrt(msError / (g.n || 1));
+    if (fullModel.covBeta && fullModel.covBeta.length === 1 + (k - 1) + p) {
+      const x0 = [1];
+      for (let i = 0; i < k - 1; i++) {
+        x0.push(gIdx === i ? 1 : 0);
+      }
+      for (let c = 0; c < p; c++) {
+        x0.push(meanCovs[c]);
+      }
+      let varPred = 0;
+      for (let r = 0; r < x0.length; r++) {
+        for (let col = 0; col < x0.length; col++) {
+          varPred += x0[r] * fullModel.covBeta[r][col] * x0[col];
+        }
+      }
+      se = Math.sqrt(Math.max(1e-12, varPred));
+    }
+
     return {
       level: g.level,
       n: g.n,
       raw_mean: Number(g.rawMean.toFixed(3)),
       adjusted_mean: Number(adjMean.toFixed(3)),
       std_error: Number(se.toFixed(3)),
-      ci_lower: Number((adjMean - 1.96 * se).toFixed(3)),
-      ci_upper: Number((adjMean + 1.96 * se).toFixed(3)),
+      ci_lower: Number((adjMean - tCrit * se).toFixed(3)),
+      ci_upper: Number((adjMean + tCrit * se).toFixed(3)),
     };
   });
 
@@ -2502,15 +2569,7 @@ export function clientComputeANCOVA(
           sig: Number(sigModel.toFixed(4)),
           eta_sq: Number(((ssModel) / (ssModel + ssError)).toFixed(3)),
         },
-        {
-          source: covariateVars[0],
-          ss: Number(ssCov.toFixed(3)),
-          df: 1,
-          ms: Number(msCov.toFixed(3)),
-          f: Number(fCov.toFixed(3)),
-          sig: Number(sigCov.toFixed(4)),
-          eta_sq: Number(etaCov.toFixed(3)),
-        },
+        ...covariateTests,
         {
           source: factorVar,
           ss: Number(ssFactor.toFixed(3)),
@@ -4039,6 +4098,7 @@ export function clientComputeOrdinalRegression(
   });
 
   // Estimate threshold parameters
+  const zCrit = normalQuantile(0.975);
   const thresholds: { label: string; estimate: number; se: number; wald: number; df: number; sig: number; lowerCI: number; upperCI: number }[] = [];
   cumProps.forEach((prop, idx) => {
     const logit = Math.log(Math.max(1e-9, prop / Math.max(1e-9, 1 - prop)));
@@ -4052,8 +4112,8 @@ export function clientComputeOrdinalRegression(
       wald: Number(wald.toFixed(3)),
       df: 1,
       sig: Number(sig.toFixed(4)),
-      lowerCI: Number((logit - 1.96 * se).toFixed(3)),
-      upperCI: Number((logit + 1.96 * se).toFixed(3)),
+      lowerCI: Number((logit - zCrit * se).toFixed(3)),
+      upperCI: Number((logit + zCrit * se).toFixed(3)),
     });
   });
 
@@ -4070,8 +4130,8 @@ export function clientComputeOrdinalRegression(
       wald: Number(wald.toFixed(3)),
       df: 1,
       sig: Number(sig.toFixed(4)),
-      lowerCI: Number((b - 1.96 * se).toFixed(3)),
-      upperCI: Number((b + 1.96 * se).toFixed(3)),
+      lowerCI: Number((b - zCrit * se).toFixed(3)),
+      upperCI: Number((b + zCrit * se).toFixed(3)),
     };
   });
 

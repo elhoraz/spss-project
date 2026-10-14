@@ -549,6 +549,24 @@ export const App: React.FC = () => {
     });
   };
 
+  // Bulk add variables (from paste in Variable View)
+  const handleBulkAddVariables = (newVars: VariableMeta[]) => {
+    if (newVars.length === 0) return;
+    pushHistory(dataset);
+    const updatedRows = dataset.rows.map((r) => {
+      const copy = { ...r };
+      newVars.forEach((v) => {
+        copy[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? null : '';
+      });
+      return copy;
+    });
+    setDataset({
+      ...dataset,
+      variables: [...dataset.variables, ...newVars],
+      rows: updatedRows,
+    });
+  };
+
   // Update variable metadata
   const handleUpdateVariable = (index: number, updated: Partial<VariableMeta>) => {
     pushHistory(dataset);
@@ -953,6 +971,7 @@ export const App: React.FC = () => {
               onDeleteVariable={handleDeleteVariable}
               onDeleteVariables={handleDeleteVariables}
               onReorderVariables={handleReorderVariables}
+              onBulkAddVariables={handleBulkAddVariables}
             />
           )}
 

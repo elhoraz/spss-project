@@ -1778,11 +1778,123 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       );
     }
 
+    // 6.5. PAIRED SAMPLES T-TEST
+    if (type === 'paired_t_test') {
+      return (
+        <div className="spss-pivot-table-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* 1. Paired Samples Statistics */}
+          <div>
+            <div className="spss-pivot-title">Paired Samples Statistics</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Pair</th>
+                  <th className="align-left">Variable</th>
+                  <th>Mean</th>
+                  <th>N</th>
+                  <th>Std. Deviation</th>
+                  <th>Std. Error Mean</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.paired_statistics?.map((stat: any, i: number) => (
+                  <tr key={i}>
+                    {i % 2 === 0 ? (
+                      <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                        {stat.pair}
+                      </td>
+                    ) : null}
+                    <td className="align-left">{stat.variable}</td>
+                    <td>{stat.mean}</td>
+                    <td>{stat.n}</td>
+                    <td>{stat.std_dev}</td>
+                    <td>{stat.se_mean}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 2. Paired Samples Correlations */}
+          {data.paired_correlations?.length > 0 && (
+            <div>
+              <div className="spss-pivot-title">Paired Samples Correlations</div>
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left">Pair</th>
+                    <th>N</th>
+                    <th>Correlation</th>
+                    <th>Sig.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.paired_correlations.map((c: any, i: number) => (
+                    <tr key={i}>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{c.pair}</td>
+                      <td>{c.n}</td>
+                      <td>{c.correlation}</td>
+                      <td style={{ fontWeight: c.sig < 0.05 ? 700 : 400, color: c.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                        {c.sig}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 3. Paired Samples Test */}
+          <div>
+            <div className="spss-pivot-title">Paired Samples Test</div>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left" rowSpan={3}>Pair</th>
+                  <th colSpan={5} className="align-center">Paired Differences</th>
+                  <th rowSpan={3}>t</th>
+                  <th rowSpan={3}>df</th>
+                  <th rowSpan={3}>Sig. (2-tailed)</th>
+                </tr>
+                <tr>
+                  <th rowSpan={2}>Mean</th>
+                  <th rowSpan={2}>Std. Deviation</th>
+                  <th rowSpan={2}>Std. Error Mean</th>
+                  <th colSpan={2} className="align-center">95% Confidence Interval</th>
+                </tr>
+                <tr>
+                  <th>Lower</th>
+                  <th>Upper</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.paired_differences?.map((d: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{d.pair}</td>
+                    <td>{d.mean}</td>
+                    <td>{d.std_dev}</td>
+                    <td>{d.se_mean}</td>
+                    <td>{d.ci_lower}</td>
+                    <td>{d.ci_upper}</td>
+                    <td style={{ fontWeight: 700 }}>{d.t}</td>
+                    <td>{d.df}</td>
+                    <td style={{ fontWeight: 700, color: d.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                      {d.sig_2_tailed}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
     // 7. ONE-WAY ANOVA
     if (type === 'one_way_anova') {
       return (
         <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Descriptives</div>
+          <div className="spss-pivot-title">Descriptives ({data.dependent_variable})</div>
           <table className="spss-pivot-table">
             <thead>
               <tr>
@@ -1791,6 +1903,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <th>Mean</th>
                 <th>Std. Deviation</th>
                 <th>Std. Error</th>
+                <th>95% CI Lower</th>
+                <th>95% CI Upper</th>
                 <th>Min</th>
                 <th>Max</th>
               </tr>
@@ -1803,6 +1917,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{d.mean}</td>
                   <td>{d.std_dev}</td>
                   <td>{d.se_mean}</td>
+                  <td>{d.ci_lower ?? '-'}</td>
+                  <td>{d.ci_upper ?? '-'}</td>
                   <td>{d.min}</td>
                   <td>{d.max}</td>
                 </tr>
@@ -1810,7 +1926,34 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </tbody>
           </table>
 
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>ANOVA</div>
+          {/* Test of Homogeneity of Variances */}
+          {data.homogeneity_of_variances && (
+            <div style={{ marginTop: 16 }}>
+              <div className="spss-pivot-title">Test of Homogeneity of Variances ({data.dependent_variable})</div>
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th>Levene Statistic</th>
+                    <th>df1</th>
+                    <th>df2</th>
+                    <th>Sig.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ fontWeight: 700 }}>{data.homogeneity_of_variances.levene_statistic}</td>
+                    <td>{data.homogeneity_of_variances.df1}</td>
+                    <td>{data.homogeneity_of_variances.df2}</td>
+                    <td style={{ fontWeight: data.homogeneity_of_variances.sig < 0.05 ? 700 : 400 }}>
+                      {data.homogeneity_of_variances.sig}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="spss-pivot-title" style={{ marginTop: 16 }}>ANOVA ({data.dependent_variable})</div>
           <table className="spss-pivot-table">
             <thead>
               <tr>
@@ -1854,7 +1997,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
 
           {data.post_hoc?.length > 0 && (
             <div style={{ marginTop: 16 }}>
-              <div className="spss-pivot-title">Multiple Comparisons: Tukey HSD</div>
+              <div className="spss-pivot-title">Multiple Comparisons: Tukey HSD ({data.dependent_variable})</div>
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -1863,6 +2006,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <th>Mean Difference (I-J)</th>
                     <th>Std. Error</th>
                     <th>Sig.</th>
+                    <th>95% CI Lower</th>
+                    <th>95% CI Upper</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1875,6 +2020,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
                         {ph.sig} {ph.significant ? '*' : ''}
                       </td>
+                      <td>{ph.ci_lower ?? '-'}</td>
+                      <td>{ph.ci_upper ?? '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1898,6 +2045,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <th>R Square</th>
                 <th>Adjusted R Square</th>
                 <th>Std. Error of the Estimate</th>
+                {data.model_summary?.durbin_watson !== undefined && <th>Durbin-Watson</th>}
               </tr>
             </thead>
             <tbody>
@@ -1907,6 +2055,9 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <td style={{ fontWeight: 700 }}>{data.model_summary?.r_squared}</td>
                 <td>{data.model_summary?.adjusted_r_squared}</td>
                 <td>{data.model_summary?.std_error_estimate}</td>
+                {data.model_summary?.durbin_watson !== undefined && (
+                  <td style={{ fontWeight: 600 }}>{data.model_summary?.durbin_watson}</td>
+                )}
               </tr>
             </tbody>
           </table>
@@ -1960,11 +2111,17 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <th className="align-center">Standardized</th>
                 <th rowSpan={2}>t</th>
                 <th rowSpan={2}>Sig.</th>
+                <th colSpan={2} className="align-center">95.0% Confidence Interval for B</th>
+                <th colSpan={2} className="align-center">Collinearity Statistics</th>
               </tr>
               <tr>
                 <th>B</th>
                 <th>Std. Error</th>
                 <th>Beta</th>
+                <th>Lower Bound</th>
+                <th>Upper Bound</th>
+                <th>Tolerance</th>
+                <th>VIF</th>
               </tr>
             </thead>
             <tbody>
@@ -1976,6 +2133,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{c.beta ?? '-'}</td>
                   <td>{c.t}</td>
                   <td style={{ fontWeight: c.sig < 0.05 ? 700 : 400 }}>{c.sig}</td>
+                  <td>{c.ci_lower ?? '-'}</td>
+                  <td>{c.ci_upper ?? '-'}</td>
+                  <td>{c.tolerance ?? '-'}</td>
+                  <td>{c.vif ?? '-'}</td>
                 </tr>
               ))}
             </tbody>

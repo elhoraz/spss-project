@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { VariableMeta, VariableType, VariableAlign, VariableMeasure, VariableRole } from '../types/spss';
-import { Trash2, Plus, ArrowUp, ArrowDown, Copy, Clipboard, Check, HelpCircle } from 'lucide-react';
+import { Trash2, Plus, ArrowUp, ArrowDown, Copy, Clipboard, Check, HelpCircle, ClipboardPaste } from 'lucide-react';
 import { VariableTypeModal } from './VariableTypeModal';
 import { MissingValuesModal } from './MissingValuesModal';
+import { parseClipboardMatrix, sanitizeSpssVarName } from '../utils/clipboardUtils';
 
 interface VariableViewGridProps {
   variables: VariableMeta[];
@@ -12,6 +13,7 @@ interface VariableViewGridProps {
   onDeleteVariable: (index: number) => void;
   onDeleteVariables?: (indices: number[]) => void;
   onReorderVariables?: (fromIndex: number, toIndex: number) => void;
+  onBulkAddVariables?: (newVars: VariableMeta[]) => void;
 }
 
 export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
@@ -22,6 +24,7 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
   onDeleteVariable,
   onDeleteVariables,
   onReorderVariables,
+  onBulkAddVariables,
 }) => {
   const [selectedTypeVarIdx, setSelectedTypeVarIdx] = useState<number | null>(null);
   const [selectedMissingVarIdx, setSelectedMissingVarIdx] = useState<number | null>(null);
@@ -37,6 +40,7 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
     attrs: Partial<VariableMeta>;
   } | null>(null);
   const [clipboardFeedback, setClipboardFeedback] = useState<string | null>(null);
+  const [pastedCount, setPastedCount] = useState<number>(0);
 
   // Focus management across the 11 columns of Variable View
   const cellRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -99,6 +103,214 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
     window.addEventListener('keydown', handleGlobalDelete);
     return () => window.removeEventListener('keydown', handleGlobalDelete);
   }, [selectedVarRows, selectedRowIdx, variables.length, onDeleteVariables, onDeleteVariable]);
+
+  // ============================================================
+  // BULK PASTE FROM EXCEL: Parse TSV rows into VariableMeta[]
+  // Columns order: Name, Type, Width, Decimals, Label, Values, Missing, Columns, Align, Measure, Role
+  // ============================================================
+  const parseVariableType = (raw: string): VariableType => {
+    const lower = raw.toLowerCase().trim();
+    if (lower.includes('string') || lower.includes('str') || lower.includes('text')) return 'String';
+    if (lower.includes('date')) return 'Date';
+    if (lower.includes('dollar') || lower.includes('dol') || lower === '$') return 'Dollar';
+    if (lower.includes('currency') || lower.includes('curr')) return 'Currency';
+    if (lower.includes('percent') || lower.includes('pct') || lower === '%') return 'Percentage';
+    return 'Numeric';
+  };
+
+  const parseAlign = (raw: string): VariableAlign => {
+    const lower = raw.toLowerCase().trim();
+    if (lower.includes('left') || lower === 'l') return 'Left';
+    if (lower.includes('center') || lower.includes('centre') || lower === 'c') return 'Center';
+    return 'Right';
+  };
+
+  const parseMeasure = (raw: string): VariableMeasure => {
+    const lower = raw.toLowerCase().trim();
+    if (lower.includes('ordinal') || lower.includes('ord')) return 'Ordinal';
+    if (lower.includes('nominal') || lower.includes('nom')) return 'Nominal';
+    return 'Scale';
+  };
+
+  const parseRole = (raw: string): VariableRole => {
+    const lower = raw.toLowerCase().trim();
+    if (lower.includes('target') || lower.includes('tgt')) return 'Target';
+    if (lower === 'both') return 'Both';
+    if (lower === 'none') return 'None';
+    if (lower.includes('partition') || lower.includes('part')) return 'Partition';
+    if (lower.includes('split')) return 'Split';
+    return 'Input';
+  };
+
+  // Detect if the first row is a header row (contains "name", "type", "label", etc.)
+  const isHeaderRow = (row: string[]): boolean => {
+    const headerKeywords = ['name', 'type', 'width', 'decimals', 'label', 'values', 'missing', 'columns', 'align', 'measure', 'role', 'variable', 'var'];
+    const matchCount = row.filter((cell) =>
+      headerKeywords.some((kw) => cell.toLowerCase().trim().includes(kw))
+    ).length;
+    return matchCount >= 2; // If 2+ cells match header keywords, it's a header
+  };
+
+  const buildVariablesFromMatrix = useCallback((matrix: string[][]): VariableMeta[] => {
+    if (matrix.length === 0) return [];
+
+    let dataRows = matrix;
+    let colMapping: Record<string, number> = {};
+
+    // Check if first row is a header
+    if (isHeaderRow(matrix[0])) {
+      const headerRow = matrix[0];
+      dataRows = matrix.slice(1);
+
+      // Map header names to column indices
+      headerRow.forEach((cell, idx) => {
+        const lower = cell.toLowerCase().trim();
+        if (lower.includes('name') || lower.includes('variable') || lower.includes('var')) colMapping['name'] = idx;
+        else if (lower.includes('type')) colMapping['type'] = idx;
+        else if (lower.includes('width') && !lower.includes('col')) colMapping['width'] = idx;
+        else if (lower.includes('decimal') || lower.includes('dec')) colMapping['decimals'] = idx;
+        else if (lower.includes('label')) colMapping['label'] = idx;
+        else if (lower.includes('value')) colMapping['values'] = idx;
+        else if (lower.includes('missing') || lower.includes('miss')) colMapping['missing'] = idx;
+        else if (lower.includes('column') || lower.includes('col')) colMapping['columns'] = idx;
+        else if (lower.includes('align')) colMapping['align'] = idx;
+        else if (lower.includes('measure') || lower.includes('meas')) colMapping['measure'] = idx;
+        else if (lower.includes('role')) colMapping['role'] = idx;
+      });
+    } else {
+      // No header: assume standard SPSS Variable View column order
+      // Name, Type, Width, Decimals, Label, Values, Missing, Columns, Align, Measure, Role
+      const keys = ['name', 'type', 'width', 'decimals', 'label', 'values', 'missing', 'columns', 'align', 'measure', 'role'];
+      keys.forEach((key, idx) => {
+        colMapping[key] = idx;
+      });
+    }
+
+    const existingNames = variables.map((v) => v.name);
+    const newVars: VariableMeta[] = [];
+
+    dataRows.forEach((row, rIdx) => {
+      if (row.every((c) => c.trim() === '')) return; // Skip fully empty rows
+
+      const getCell = (key: string): string => {
+        const idx = colMapping[key];
+        return idx !== undefined && idx < row.length ? row[idx].trim() : '';
+      };
+
+      // Name is required
+      let rawName = getCell('name');
+      if (!rawName) {
+        // If no name column mapped or cell empty, generate auto-name
+        rawName = `VAR${String(variables.length + newVars.length + 1).padStart(5, '0')}`;
+      }
+      const sanitized = sanitizeSpssVarName(rawName, [...existingNames, ...newVars.map((v) => v.name)], rIdx);
+
+      const typeStr = getCell('type');
+      const widthStr = getCell('width');
+      const decStr = getCell('decimals');
+      const labelStr = getCell('label');
+      const missingStr = getCell('missing');
+      const columnsStr = getCell('columns');
+      const alignStr = getCell('align');
+      const measureStr = getCell('measure');
+      const roleStr = getCell('role');
+
+      const varType = typeStr ? parseVariableType(typeStr) : 'Numeric';
+      const width = widthStr ? (parseInt(widthStr) || 8) : (varType === 'String' ? 50 : 8);
+      const decimals = decStr ? Math.max(0, parseInt(decStr) || 0) : (varType === 'String' ? 0 : 2);
+
+      newVars.push({
+        name: sanitized,
+        type: varType,
+        width,
+        decimals,
+        label: labelStr || '',
+        values: {},
+        missing: missingStr || 'None',
+        columns: columnsStr ? (parseInt(columnsStr) || 8) : (varType === 'String' ? 12 : 8),
+        align: alignStr ? parseAlign(alignStr) : (varType === 'String' ? 'Left' : 'Right'),
+        measure: measureStr ? parseMeasure(measureStr) : (varType === 'String' ? 'Nominal' : 'Scale'),
+        role: roleStr ? parseRole(roleStr) : 'Input',
+      });
+    });
+
+    return newVars;
+  }, [variables]);
+
+  // Global Paste listener for Variable View bulk paste
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      // Don't intercept if typing in an input field
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text || text.trim().length === 0) return;
+
+      // Only intercept multi-line or multi-cell pastes
+      if (!text.includes('\t') && !text.includes('\n')) return;
+
+      e.preventDefault();
+      const matrix = parseClipboardMatrix(text);
+      if (matrix.length === 0) return;
+
+      const newVars = buildVariablesFromMatrix(matrix);
+      if (newVars.length === 0) return;
+
+      if (onBulkAddVariables) {
+        onBulkAddVariables(newVars);
+        setPastedCount(newVars.length);
+        setClipboardFeedback(`✅ Pasted ${newVars.length} variables from clipboard`);
+        setTimeout(() => {
+          setClipboardFeedback(null);
+          setPastedCount(0);
+        }, 4000);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [buildVariablesFromMatrix, onBulkAddVariables]);
+
+  // Manual paste button handler (reads from clipboard API)
+  const handleManualPaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || text.trim().length === 0) {
+        setClipboardFeedback('❌ Clipboard is empty');
+        setTimeout(() => setClipboardFeedback(null), 3000);
+        return;
+      }
+
+      const matrix = parseClipboardMatrix(text);
+      if (matrix.length === 0) {
+        setClipboardFeedback('❌ No valid data found in clipboard');
+        setTimeout(() => setClipboardFeedback(null), 3000);
+        return;
+      }
+
+      const newVars = buildVariablesFromMatrix(matrix);
+      if (newVars.length === 0) {
+        setClipboardFeedback('❌ Could not parse any variables from clipboard');
+        setTimeout(() => setClipboardFeedback(null), 3000);
+        return;
+      }
+
+      if (onBulkAddVariables) {
+        onBulkAddVariables(newVars);
+        setPastedCount(newVars.length);
+        setClipboardFeedback(`✅ Pasted ${newVars.length} variables from clipboard`);
+        setTimeout(() => {
+          setClipboardFeedback(null);
+          setPastedCount(0);
+        }, 4000);
+      }
+    } catch {
+      setClipboardFeedback('⚠️ Please use Ctrl+V to paste (browser requires focus)');
+      setTimeout(() => setClipboardFeedback(null), 3500);
+    }
+  };
 
   const handleRowHeaderClick = (idx: number, e: React.MouseEvent) => {
     if (e.shiftKey && lastVarAnchorRef.current !== null) {
@@ -357,6 +569,18 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
           }
         >
           <Clipboard size={13} /> Paste Attributes
+        </button>
+
+        <div style={{ width: 1, height: 18, background: 'var(--border-header)', margin: '0 4px' }} />
+
+        {/* Paste Variables from Excel */}
+        <button
+          className="spss-btn spss-btn-sm"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.3)' }}
+          onClick={handleManualPaste}
+          title="Paste variables from Excel/clipboard (or press Ctrl+V). Copy rows from Excel with columns: Name, Type, Width, Decimals, Label, etc."
+        >
+          <ClipboardPaste size={13} /> Paste Variables from Excel
         </button>
 
         {copiedAttributes && (
