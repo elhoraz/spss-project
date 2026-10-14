@@ -57,6 +57,11 @@ export const App: React.FC = () => {
   const futureRef = useRef<Dataset[]>([]);
   const [canUndo, setCanUndo] = useState<boolean>(false);
   const [canRedo, setCanRedo] = useState<boolean>(false);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+
+  useEffect(() => {
+    document.title = `${dataset.name}${isDirty ? ' *' : ''} - IBM SPSS Statistics Studio`;
+  }, [dataset.name, isDirty]);
 
   const pushHistory = (currentDataset: Dataset) => {
     pastRef.current.push(JSON.parse(JSON.stringify(currentDataset)));
@@ -64,6 +69,7 @@ export const App: React.FC = () => {
     futureRef.current = [];
     setCanUndo(true);
     setCanRedo(false);
+    setIsDirty(true);
   };
 
   const handleUndo = () => {
@@ -422,6 +428,20 @@ export const App: React.FC = () => {
     });
   };
 
+  // Direct clipboard paste handler for Menu Bar
+  const handlePasteFromClipboard = async (withVariableNames = false) => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      const lines = text.split(/\r\n|\n|\r/).filter((r) => r.trim() !== '');
+      const matrix = lines.map((r) => r.split('\t'));
+      handleBulkPaste(0, 0, matrix, withVariableNames);
+      setActiveView('data');
+    } catch (err) {
+      alert('Clipboard access denied or unavailable. Please click on the table and press Ctrl+V or Ctrl+Alt+V.');
+    }
+  };
+
   // Insert multiple cases (from InsertCasesDialog or menu)
   const handleInsertCases = (
     count: number,
@@ -460,7 +480,11 @@ export const App: React.FC = () => {
 
   // Start a new blank dataset (File -> New -> Data)
   const handleNewDataset = () => {
-    pushHistory(dataset);
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setIsDirty(false);
     const defaultVars: VariableMeta[] = [
       { name: 'VAR00001', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
       { name: 'VAR00002', type: 'Numeric', width: 8, decimals: 2, label: '', values: {}, missing: 'None', columns: 8, align: 'Right', measure: 'Scale', role: 'Input' },
@@ -480,7 +504,7 @@ export const App: React.FC = () => {
     pushHistory(dataset);
     const newRow: Record<string, any> = {};
     dataset.variables.forEach((v) => {
-      newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? 0 : '';
+      newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' || v.type === 'Currency' || v.type === 'Percentage' ? null : '';
     });
     newRow.id = dataset.rows.length + 1;
     setDataset({ ...dataset, rows: [...dataset.rows, newRow] });
@@ -541,7 +565,7 @@ export const App: React.FC = () => {
       measure: 'Scale',
       role: 'Input',
     };
-    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: 0 }));
+    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: null }));
     setDataset({
       ...dataset,
       variables: [...dataset.variables, newVar],
@@ -648,7 +672,7 @@ export const App: React.FC = () => {
     pushHistory(dataset);
     const newRow: Record<string, any> = {};
     dataset.variables.forEach((v) => {
-      newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? 0 : '';
+      newRow[v.name] = v.type === 'Numeric' || v.type === 'Dollar' || v.type === 'Currency' || v.type === 'Percentage' ? null : '';
     });
     newRow.id = dataset.rows.length + 1;
     const newRows = [...dataset.rows];
@@ -676,7 +700,7 @@ export const App: React.FC = () => {
     };
     const newVars = [...dataset.variables];
     newVars.splice(beforeIndex, 0, newVar);
-    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: 0 }));
+    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: null }));
     setDataset({ ...dataset, variables: newVars, rows: updatedRows });
   };
 
@@ -726,7 +750,11 @@ export const App: React.FC = () => {
 
   // Switch between sample datasets
   const handleSelectSampleDataset = (name: string) => {
-    pushHistory(dataset);
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setIsDirty(false);
     if (name.includes('Clinical')) {
       setDataset(clinicalTrialDataset);
       recordRecentFile('Clinical Trial.sav');
@@ -745,7 +773,11 @@ export const App: React.FC = () => {
 
   // Dataset loaded handler (from file upload or recent file)
   const handleDatasetLoaded = (newDs: Dataset) => {
-    pushHistory(dataset);
+    pastRef.current = [];
+    futureRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setIsDirty(false);
     setDataset(newDs);
     recordRecentFile(newDs.name);
     try {
@@ -774,6 +806,7 @@ export const App: React.FC = () => {
         exportReportToExcel(outputs, dataset.name);
         return;
       }
+      setIsDirty(false);
       const wb = XLSX.utils.book_new();
       const wsData = XLSX.utils.json_to_sheet(dataset.rows);
       XLSX.utils.book_append_sheet(wb, wsData, 'Data View');
@@ -784,6 +817,7 @@ export const App: React.FC = () => {
     }
 
     if (format === 'sav') {
+      setIsDirty(false);
       // Try exporting as true binary .sav via backend pyreadstat
       try {
         const res = await fetch('/api/datasets/export-sav', {
@@ -822,6 +856,7 @@ export const App: React.FC = () => {
     }
 
     if (format === 'sav_json') {
+      setIsDirty(false);
       const jsonStr = JSON.stringify(dataset, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -836,6 +871,7 @@ export const App: React.FC = () => {
     }
 
     if (format === 'csv') {
+      setIsDirty(false);
       const ws = XLSX.utils.json_to_sheet(dataset.rows);
       const csv = XLSX.utils.sheet_to_csv(ws);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -877,7 +913,7 @@ export const App: React.FC = () => {
             </svg>
           </div>
           <span className="spss-titlebar-title">IBM SPSS Statistics</span>
-          <span className="spss-titlebar-status">[{dataset.name}]</span>
+          <span className="spss-titlebar-status">[{dataset.name}{isDirty ? ' *' : ''}]</span>
         </div>
         <div className="spss-titlebar-right">
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pro Edition v1.0</span>
@@ -909,6 +945,7 @@ export const App: React.FC = () => {
         }}
         onOpenInsertCasesModal={() => setShowInsertCases(true)}
         onInsertVariable={handleAddVariable}
+        onPasteFromClipboard={handlePasteFromClipboard}
       />
 
       {/* 3. Toolbar */}

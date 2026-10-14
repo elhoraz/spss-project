@@ -142,7 +142,7 @@ export function clientComputeFrequencies(
       const raw = r[varName];
       const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
       if (w <= 0) return;
-      if (raw === undefined || raw === null || String(raw).trim() === '') {
+      if (raw === undefined || raw === null || String(raw).trim() === '' || String(raw).trim() === '.') {
         missingCount += w;
       } else {
         const strVal = String(raw).trim();
@@ -211,7 +211,15 @@ export function clientComputeCrosstabs(
   weightVar?: string | null
 ): OutputItem {
   const validRows = rows.filter(
-    (r) => r[rowVar] !== undefined && r[rowVar] !== null && r[colVar] !== undefined && r[colVar] !== null
+    (r) =>
+      r[rowVar] !== undefined &&
+      r[rowVar] !== null &&
+      String(r[rowVar]).trim() !== '' &&
+      String(r[rowVar]).trim() !== '.' &&
+      r[colVar] !== undefined &&
+      r[colVar] !== null &&
+      String(r[colVar]).trim() !== '' &&
+      String(r[colVar]).trim() !== '.'
   );
 
   const rowSet = Array.from(new Set(validRows.map((r) => String(r[rowVar])))).sort();

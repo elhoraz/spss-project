@@ -64,7 +64,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
     const { dataset } = get();
     const newRow: Record<string, any> = { id: dataset.rows.length + 1 };
     dataset.variables.forEach((v) => {
-      newRow[v.name] = v.type === 'Numeric' || v.type === 'Currency' ? 0 : '';
+      newRow[v.name] = v.type === 'Numeric' || v.type === 'Currency' || v.type === 'Dollar' ? null : '';
     });
     set({
       dataset: { ...dataset, rows: [...dataset.rows, newRow] },
@@ -88,7 +88,7 @@ export const useDatasetStore = create<DatasetState>((set, get) => ({
       measure: 'Scale',
       role: 'Input',
     };
-    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: 0 }));
+    const updatedRows = dataset.rows.map((r) => ({ ...r, [newVarName]: null }));
     set({
       dataset: {
         ...dataset,

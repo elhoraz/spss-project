@@ -34,6 +34,7 @@ interface TopMenuBarProps {
   onFindReplace?: () => void;
   onOpenInsertCasesModal?: () => void;
   onInsertVariable?: () => void;
+  onPasteFromClipboard?: (withVariableNames: boolean) => void;
   recentFiles?: string[];
   onSelectRecentFile?: (filename: string) => void;
 }
@@ -54,6 +55,7 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   onFindReplace,
   onOpenInsertCasesModal,
   onInsertVariable,
+  onPasteFromClipboard,
   recentFiles,
   onSelectRecentFile,
 }) => {
@@ -211,9 +213,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div
               className="spss-dropdown-item"
               onClick={() => {
-                handleAction(() => {
-                  alert('To paste data from Excel: Click any cell on Data View and press Ctrl+V.');
-                });
+                if (onPasteFromClipboard) {
+                  handleAction(() => onPasteFromClipboard(false));
+                } else {
+                  handleAction(() => {
+                    alert('To paste data from Excel: Click any cell on Data View and press Ctrl+V.');
+                  });
+                }
               }}
             >
               <div className="spss-dropdown-item-left">
@@ -224,9 +230,13 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div
               className="spss-dropdown-item"
               onClick={() => {
-                handleAction(() => {
-                  alert('To paste table with variable names: Click row 1 on Data View and press Ctrl+Alt+V.');
-                });
+                if (onPasteFromClipboard) {
+                  handleAction(() => onPasteFromClipboard(true));
+                } else {
+                  handleAction(() => {
+                    alert('To paste table with variable names: Click row 1 on Data View and press Ctrl+Alt+V.');
+                  });
+                }
               }}
             >
               <div className="spss-dropdown-item-left">
