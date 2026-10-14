@@ -63,6 +63,18 @@ export const App: React.FC = () => {
     document.title = `${dataset.name}${isDirty ? ' *' : ''} - IBM SPSS Statistics Studio`;
   }, [dataset.name, isDirty]);
 
+  // Protect against accidental browser unload/refresh when changes are unsaved
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
   const pushHistory = (currentDataset: Dataset) => {
     pastRef.current.push(JSON.parse(JSON.stringify(currentDataset)));
     if (pastRef.current.length > 50) pastRef.current.shift();
@@ -404,6 +416,16 @@ export const App: React.FC = () => {
         newRow[v.name] = null;
       });
       updatedRows.push(newRow);
+    }
+
+    // Ensure all rows have keys initialized for any newly added variables
+    for (let i = 0; i < updatedRows.length; i++) {
+      const r = updatedRows[i];
+      currentVars.forEach((v) => {
+        if (r[v.name] === undefined) {
+          r[v.name] = null;
+        }
+      });
     }
 
     // 4. Fill cells with smart locale-aware value parsing

@@ -618,6 +618,23 @@ tr.filtered-case-row td.spss-grid-td {
   user-select: none;
 }
 
+/* User-missing value in SPSS format */
+.spss-grid-td.user-missing {
+  color: var(--text-dim);
+  font-style: italic;
+  position: relative;
+}
+.spss-grid-td.user-missing::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
 /* Data Cells */
 .spss-grid-td {
   border-right: 1px solid var(--border-cell);

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { VariableMeta } from '../types/spss';
 import { GridContextMenu } from './GridContextMenu';
-import { parseClipboardMatrix } from '../utils/clipboardUtils';
+import { parseClipboardMatrix, parseExcelCell } from '../utils/clipboardUtils';
+import { isUserMissingValue } from '../utils/missingUtils';
 
 interface SelectionRange {
   startRow: number;
@@ -350,10 +351,9 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     let parsedVal: any = editValue.trim();
     if (parsedVal === '' || parsedVal === '.') {
       parsedVal = null;
-    } else if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-      const clean = parsedVal.replace(/[$,]/g, '').replace(',', '.');
-      const num = parseFloat(clean);
-      parsedVal = isNaN(num) ? parsedVal : num;
+    } else if (varMeta.type !== 'String') {
+      const parsed = parseExcelCell(parsedVal);
+      parsedVal = parsed.isNumeric ? parsed.value : parsedVal;
     }
 
     onCellChange(editingCell.row, varMeta.name, parsedVal);
@@ -542,11 +542,17 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
       if (editingCell) {
         if (e.key === 'Enter') {
-          const nextRow = selectedCell.row + 1;
+          const nextRow = e.shiftKey ? Math.max(0, selectedCell.row - 1) : selectedCell.row + 1;
           commitEdit();
           selectSingleCell(nextRow, selectedCell.col);
         } else if (e.key === 'Escape') {
           setEditingCell(null);
+        } else if (e.key === 'ArrowUp') {
+          commitEdit();
+          selectSingleCell(Math.max(0, selectedCell.row - 1), selectedCell.col);
+        } else if (e.key === 'ArrowDown') {
+          commitEdit();
+          selectSingleCell(Math.min(displayRowCount - 1, selectedCell.row + 1), selectedCell.col);
         } else if (e.key === 'Tab') {
           e.preventDefault();
           commitEdit();
@@ -778,7 +784,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   const isSystemMissing = (val: any, varMeta: VariableMeta) => {
     if (val === undefined || val === null || val === '') {
-      return varMeta.type === 'Numeric' || varMeta.type === 'Dollar';
+      return varMeta.type !== 'String';
     }
     return false;
   };
@@ -786,7 +792,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   // Helper to format cell display
   const formatCellValue = (val: any, varMeta: VariableMeta) => {
     if (val === undefined || val === null || val === '') {
-      if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
+      if (varMeta.type !== 'String') {
         return '.';
       }
       return '';
@@ -802,6 +808,18 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
       return !isNaN(num)
         ? `$${num.toLocaleString('en-US', { minimumFractionDigits: varMeta.decimals, maximumFractionDigits: varMeta.decimals })}`
         : String(val);
+    }
+
+    if (varMeta.type === 'Currency') {
+      const num = typeof val === 'number' ? val : parseFloat(val);
+      return !isNaN(num)
+        ? num.toLocaleString('en-US', { minimumFractionDigits: varMeta.decimals, maximumFractionDigits: varMeta.decimals })
+        : String(val);
+    }
+
+    if (varMeta.type === 'Percentage') {
+      const num = typeof val === 'number' ? val : parseFloat(val);
+      return !isNaN(num) ? `${num.toFixed(varMeta.decimals)}%` : String(val);
     }
 
     if (varMeta.type === 'Numeric') {
@@ -1001,6 +1019,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                     const cellVal = row[v.name];
                     const alignClass = `align-${v.align.toLowerCase()}`;
                     const isMissing = isSystemMissing(cellVal, v);
+                    const isUserMissing = isUserMissingValue(cellVal, v);
 
                     return (
                       <td
@@ -1009,7 +1028,8 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                           (inRange && !isSelected) || (inMultiRow && !isSelected) || (inMultiCol && !isSelected)
                             ? 'in-selection-range'
                             : ''
-                        } ${isMissing ? 'system-missing' : ''}`}
+                        } ${isMissing ? 'system-missing' : ''} ${isUserMissing ? 'user-missing' : ''}`}
+                        title={isUserMissing ? `User-Missing value: ${cellVal} (Defined missing in Variable View)` : undefined}
                         onMouseDown={(e) => handleCellMouseDown(rIdx, cIdx, e)}
                         onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
                         onDoubleClick={() => startEditing(rIdx, cIdx)}

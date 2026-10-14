@@ -710,6 +710,23 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
                       value={v.name}
                       onFocus={() => setSelectedRowIdx(idx)}
                       onChange={(e) => onUpdateVariable(idx, { name: e.target.value.replace(/\s+/g, '_') })}
+                      onBlur={(e) => {
+                        const trimmed = e.target.value.trim().replace(/\s+/g, '_');
+                        if (!trimmed) {
+                          onUpdateVariable(idx, { name: `VAR${String(idx + 1).padStart(5, '0')}` });
+                          return;
+                        }
+                        const otherNames = new Set(variables.filter((_, i) => i !== idx).map((other) => other.name.toLowerCase()));
+                        let finalName = trimmed;
+                        let counter = 1;
+                        while (otherNames.has(finalName.toLowerCase())) {
+                          finalName = `${trimmed}_${counter}`;
+                          counter++;
+                        }
+                        if (finalName !== v.name) {
+                          onUpdateVariable(idx, { name: finalName });
+                        }
+                      }}
                       onKeyDown={(e) => handleKeyDown(e, idx, 0)}
                     />
                   </td>
