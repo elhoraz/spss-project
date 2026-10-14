@@ -1283,19 +1283,39 @@ export function clientComputeTwoWayAnova(rows: Record<string, any>[], depVar: st
   const dfAxB = dfA * dfB;
   const dfError = N - levelsA.length * levelsB.length;
   const dfTotal = N - 1;
+  const dfModel = levelsA.length * levelsB.length - 1;
 
+  const ssModel = ssCells;
+  const msModel = dfModel > 0 ? ssModel / dfModel : 0;
   const msA = dfA > 0 ? ssA / dfA : 0;
   const msB = dfB > 0 ? ssB / dfB : 0;
   const msAxB = dfAxB > 0 ? ssAxB / dfAxB : 0;
   const msError = dfError > 0 ? ssError / dfError : 1;
 
+  const ssIntercept = N * Math.pow(grandMean, 2);
+  const msIntercept = ssIntercept;
+  const rawTotal = validData.reduce((acc, d) => acc + Math.pow(d.y, 2), 0);
+
+  const fModel = msError > 0 ? msModel / msError : 0;
+  const fIntercept = msError > 0 ? msIntercept / msError : 0;
   const fA = msError > 0 ? msA / msError : 0;
   const fB = msError > 0 ? msB / msError : 0;
   const fAxB = msError > 0 ? msAxB / msError : 0;
 
+  const pModel = fDistPValue(fModel, dfModel, dfError);
+  const pIntercept = fDistPValue(fIntercept, 1, dfError);
   const pA = fDistPValue(fA, dfA, dfError);
   const pB = fDistPValue(fB, dfB, dfError);
   const pAxB = fDistPValue(fAxB, dfAxB, dfError);
+
+  const etaSqModel = ssTotal > 0 ? ssModel / ssTotal : 0;
+  const etaSqIntercept = ssIntercept + ssError > 0 ? ssIntercept / (ssIntercept + ssError) : 0;
+  const etaSqA = ssA + ssError > 0 ? ssA / (ssA + ssError) : 0;
+  const etaSqB = ssB + ssError > 0 ? ssB / (ssB + ssError) : 0;
+  const etaSqAxB = ssAxB + ssError > 0 ? ssAxB / (ssAxB + ssError) : 0;
+
+  const rSquared = ssTotal > 0 ? ssModel / ssTotal : 0;
+  const adjRSquared = dfError > 0 && dfTotal > 0 ? 1 - ((ssError / dfError) / (ssTotal / dfTotal)) : 0;
 
   return {
     id: `two_way_anova_${Date.now()}`,
@@ -1308,12 +1328,17 @@ export function clientComputeTwoWayAnova(rows: Record<string, any>[], depVar: st
       factor_a: factorA,
       factor_b: factorB,
       between_subjects_effects: [
-        { source: factorA, sum_of_squares: Number(ssA.toFixed(3)), df: dfA, mean_square: Number(msA.toFixed(3)), f: Number(fA.toFixed(3)), sig: Number(pA.toFixed(4)) },
-        { source: factorB, sum_of_squares: Number(ssB.toFixed(3)), df: dfB, mean_square: Number(msB.toFixed(3)), f: Number(fB.toFixed(3)), sig: Number(pB.toFixed(4)) },
-        { source: `${factorA} * ${factorB}`, sum_of_squares: Number(ssAxB.toFixed(3)), df: dfAxB, mean_square: Number(msAxB.toFixed(3)), f: Number(fAxB.toFixed(3)), sig: Number(pAxB.toFixed(4)) },
-        { source: 'Error', sum_of_squares: Number(ssError.toFixed(3)), df: dfError, mean_square: Number(msError.toFixed(3)), f: null, sig: null },
-        { source: 'Total', sum_of_squares: Number(ssTotal.toFixed(3)), df: dfTotal, mean_square: null, f: null, sig: null },
+        { source: 'Corrected Model', sum_of_squares: Number(ssModel.toFixed(3)), df: dfModel, mean_square: Number(msModel.toFixed(3)), f: Number(fModel.toFixed(3)), sig: Number(pModel.toFixed(4)), partial_eta_squared: Number(etaSqModel.toFixed(3)) },
+        { source: 'Intercept', sum_of_squares: Number(ssIntercept.toFixed(3)), df: 1, mean_square: Number(msIntercept.toFixed(3)), f: Number(fIntercept.toFixed(3)), sig: Number(pIntercept.toFixed(4)), partial_eta_squared: Number(etaSqIntercept.toFixed(3)) },
+        { source: factorA, sum_of_squares: Number(ssA.toFixed(3)), df: dfA, mean_square: Number(msA.toFixed(3)), f: Number(fA.toFixed(3)), sig: Number(pA.toFixed(4)), partial_eta_squared: Number(etaSqA.toFixed(3)) },
+        { source: factorB, sum_of_squares: Number(ssB.toFixed(3)), df: dfB, mean_square: Number(msB.toFixed(3)), f: Number(fB.toFixed(3)), sig: Number(pB.toFixed(4)), partial_eta_squared: Number(etaSqB.toFixed(3)) },
+        { source: `${factorA} * ${factorB}`, sum_of_squares: Number(ssAxB.toFixed(3)), df: dfAxB, mean_square: Number(msAxB.toFixed(3)), f: Number(fAxB.toFixed(3)), sig: Number(pAxB.toFixed(4)), partial_eta_squared: Number(etaSqAxB.toFixed(3)) },
+        { source: 'Error', sum_of_squares: Number(ssError.toFixed(3)), df: dfError, mean_square: Number(msError.toFixed(3)), f: null, sig: null, partial_eta_squared: null },
+        { source: 'Total', sum_of_squares: Number(rawTotal.toFixed(3)), df: N, mean_square: null, f: null, sig: null, partial_eta_squared: null },
+        { source: 'Corrected Total', sum_of_squares: Number(ssTotal.toFixed(3)), df: dfTotal, mean_square: null, f: null, sig: null, partial_eta_squared: null },
       ],
+      r_squared: Number(rSquared.toFixed(3)),
+      adj_r_squared: Number(adjRSquared.toFixed(3)),
     },
   };
 }

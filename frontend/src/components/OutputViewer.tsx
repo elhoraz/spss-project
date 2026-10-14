@@ -1452,9 +1452,18 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{row.variance?.toLocaleString()}</td>
                 </tr>
               ))}
+              <tr className="spss-pivot-total-row">
+                <td className="align-left" style={{ fontWeight: 600 }}>Valid N (listwise)</td>
+                <td>{data.rows?.[0]?.valid_n || 0}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+              </tr>
             </tbody>
           </table>
-          <div className="spss-pivot-notes">a. Valid N (listwise) = {data.rows?.[0]?.valid_n || 0}</div>
         </div>
       );
     }
@@ -1469,38 +1478,60 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
-                    <th className="align-left">Value / Category</th>
+                    <th className="align-left" colSpan={2}></th>
                     <th>Frequency</th>
                     <th>Percent</th>
                     <th>Valid Percent</th>
-                    <th>Cumulative %</th>
+                    <th>Cumulative Percent</th>
                   </tr>
                 </thead>
                 <tbody>
                   {table.rows?.map((r: any, rIdx: number) => (
                     <tr key={rIdx}>
+                      {rIdx === 0 && (
+                        <td className="align-left" rowSpan={(table.rows?.length || 0) + 1} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                          Valid
+                        </td>
+                      )}
                       <td className="align-left">{r.label !== r.value ? `${r.label} (${r.value})` : r.value}</td>
                       <td>{r.frequency}</td>
-                      <td>{r.percent}%</td>
-                      <td>{r.valid_percent}%</td>
-                      <td>{r.cumulative_percent}%</td>
+                      <td>{r.percent}</td>
+                      <td>{r.valid_percent}</td>
+                      <td>{r.cumulative_percent}</td>
                     </tr>
                   ))}
                   <tr className="spss-pivot-total-row">
-                    <td className="align-left">Total Valid</td>
+                    <td className="align-left" style={{ fontWeight: 600 }}>Total</td>
                     <td>{table.total_valid}</td>
-                    <td>100.0%</td>
-                    <td>100.0%</td>
-                    <td>-</td>
+                    <td>100.0</td>
+                    <td>100.0</td>
+                    <td></td>
                   </tr>
                   {table.total_missing > 0 && (
-                    <tr>
-                      <td className="align-left" style={{ color: 'var(--text-muted)' }}>Missing System</td>
-                      <td>{table.total_missing}</td>
-                      <td>{((table.total_missing / table.total) * 100).toFixed(1)}%</td>
-                      <td>-</td>
-                      <td>-</td>
-                    </tr>
+                    <>
+                      <tr>
+                        <td className="align-left" rowSpan={2} style={{ color: 'var(--text-muted)', verticalAlign: 'top' }}>Missing</td>
+                        <td className="align-left" style={{ color: 'var(--text-muted)' }}>System</td>
+                        <td>{table.total_missing}</td>
+                        <td>{((table.total_missing / table.total) * 100).toFixed(1)}</td>
+                        <td></td>
+                        <td></td>
+                      </tr>
+                      <tr className="spss-pivot-total-row">
+                        <td className="align-left" style={{ color: 'var(--text-muted)' }}>Total</td>
+                        <td>{table.total_missing}</td>
+                        <td>{((table.total_missing / table.total) * 100).toFixed(1)}</td>
+                        <td></td>
+                        <td></td>
+                      </tr>
+                      <tr className="spss-pivot-total-row">
+                        <td className="align-left" colSpan={2} style={{ fontWeight: 700 }}>Total</td>
+                        <td>{table.total}</td>
+                        <td>100.0</td>
+                        <td></td>
+                        <td></td>
+                      </tr>
+                    </>
                   )}
                 </tbody>
               </table>
@@ -1514,11 +1545,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     if (type === 'crosstabs') {
       return (
         <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">{data.title}</div>
+          <div className="spss-pivot-title">{data.row_var} * {data.col_var} Crosstabulation</div>
           <table className="spss-pivot-table">
             <thead>
               <tr>
-                <th className="align-left" rowSpan={2}>{data.row_var}</th>
+                <th className="align-left" colSpan={2} rowSpan={2}>{data.row_var}</th>
                 <th className="align-center" colSpan={data.col_categories?.length || 1}>{data.col_var}</th>
                 <th rowSpan={2}>Total</th>
               </tr>
@@ -1530,24 +1561,54 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </thead>
             <tbody>
               {data.row_categories?.map((rowCat: string, rIdx: number) => (
-                <tr key={rIdx}>
-                  <td className="align-left" style={{ fontWeight: 600 }}>{rowCat}</td>
-                  {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                    <td key={cIdx}>
-                      <div>{cell.count}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Exp: {cell.expected}</div>
-                      <div style={{ fontSize: 10, color: 'var(--accent)' }}>{cell.row_percent}%</div>
+                <React.Fragment key={rIdx}>
+                  <tr>
+                    <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                      {rowCat}
                     </td>
-                  ))}
-                  <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
-                </tr>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
+                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                      <td key={cIdx}>{cell.count}</td>
+                    ))}
+                    <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                  </tr>
+                  <tr>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                      <td key={cIdx}>{cell.expected}</td>
+                    ))}
+                    <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                  </tr>
+                  <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                      <td key={cIdx}>{cell.row_percent}%</td>
+                    ))}
+                    <td style={{ fontWeight: 600 }}>100.0%</td>
+                  </tr>
+                </React.Fragment>
               ))}
               <tr className="spss-pivot-total-row">
-                <td className="align-left">Total</td>
+                <td className="align-left" rowSpan={3} style={{ fontWeight: 700, verticalAlign: 'top' }}>Total</td>
+                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
                 {data.col_totals?.map((colTot: number, cIdx: number) => (
                   <td key={cIdx}>{colTot}</td>
                 ))}
                 <td>{data.grand_total}</td>
+              </tr>
+              <tr>
+                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                {data.col_totals?.map((colTot: number, cIdx: number) => (
+                  <td key={cIdx}>{colTot}</td>
+                ))}
+                <td>{data.grand_total}</td>
+              </tr>
+              <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
+                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                {data.col_totals?.map((colTot: number, cIdx: number) => (
+                  <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                ))}
+                <td>100.0%</td>
               </tr>
             </tbody>
           </table>
@@ -1606,7 +1667,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pearson Correlation</td>
                     {rowItem.correlations?.map((c: any, cIdx: number) => (
                       <td key={cIdx} style={{ fontWeight: 600 }}>
-                        {c.coefficient !== null ? `${c.coefficient}${c.flag}` : '-'}
+                        {c.coefficient !== null ? (c.var1 === c.var2 ? '1' : `${c.coefficient}${c.flag || ''}`) : '-'}
                       </td>
                     ))}
                   </tr>
@@ -1665,16 +1726,19 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </tbody>
           </table>
 
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>One-Sample Test (Test Value = {data.test_value})</div>
+          <div className="spss-pivot-title" style={{ marginTop: 16 }}>One-Sample Test</div>
           <table className="spss-pivot-table">
             <thead>
               <tr>
-                <th className="align-left" rowSpan={2}>Variable</th>
+                <th className="align-left" rowSpan={3}>Variable</th>
+                <th colSpan={6} className="align-center">Test Value = {data.test_value}</th>
+              </tr>
+              <tr>
                 <th rowSpan={2}>t</th>
                 <th rowSpan={2}>df</th>
                 <th rowSpan={2}>Sig. (2-tailed)</th>
                 <th rowSpan={2}>Mean Difference</th>
-                <th colSpan={2} className="align-center">95% Confidence Interval</th>
+                <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
               </tr>
               <tr>
                 <th>Lower</th>
@@ -1733,32 +1797,42 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           <table className="spss-pivot-table">
             <thead>
               <tr>
-                <th className="align-left" rowSpan={2}>Variable</th>
+                <th className="align-left" rowSpan={3} colSpan={2}></th>
                 <th colSpan={2} className="align-center">Levene's Test for Equality of Variances</th>
-                <th colSpan={5} className="align-center">t-test for Equality of Means</th>
+                <th colSpan={7} className="align-center">t-test for Equality of Means</th>
               </tr>
               <tr>
-                <th>F</th>
-                <th>Sig.</th>
-                <th>t</th>
-                <th>df</th>
-                <th>Sig. (2-tailed)</th>
-                <th>Mean Diff</th>
-                <th>Std. Error Diff</th>
+                <th rowSpan={2}>F</th>
+                <th rowSpan={2}>Sig.</th>
+                <th rowSpan={2}>t</th>
+                <th rowSpan={2}>df</th>
+                <th rowSpan={2}>Sig. (2-tailed)</th>
+                <th rowSpan={2}>Mean Difference</th>
+                <th rowSpan={2}>Std. Error Difference</th>
+                <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
+              </tr>
+              <tr>
+                <th>Lower</th>
+                <th>Upper</th>
               </tr>
             </thead>
             <tbody>
               {data.test_results?.map((t: any, i: number) => (
                 <React.Fragment key={i}>
                   <tr>
-                    <td className="align-left" style={{ fontWeight: 600 }}>Equal variances assumed</td>
+                    <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>{t.variable}</td>
+                    <td className="align-left" style={{ fontWeight: 500 }}>Equal variances assumed</td>
                     <td>{t.levene_f}</td>
                     <td>{t.levene_sig}</td>
                     <td>{t.equal_var_assumed?.t}</td>
                     <td>{t.equal_var_assumed?.df}</td>
-                    <td style={{ fontWeight: 700 }}>{t.equal_var_assumed?.sig_2_tailed}</td>
+                    <td style={{ fontWeight: 700, color: t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                      {t.equal_var_assumed?.sig_2_tailed}
+                    </td>
                     <td>{t.equal_var_assumed?.mean_diff}</td>
                     <td>{t.equal_var_assumed?.se_diff}</td>
+                    <td>{t.equal_var_assumed?.ci_lower}</td>
+                    <td>{t.equal_var_assumed?.ci_upper}</td>
                   </tr>
                   <tr>
                     <td className="align-left" style={{ color: 'var(--text-muted)' }}>Equal variances not assumed</td>
@@ -1766,9 +1840,13 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <td>-</td>
                     <td>{t.equal_var_not_assumed?.t}</td>
                     <td>{t.equal_var_not_assumed?.df}</td>
-                    <td>{t.equal_var_not_assumed?.sig_2_tailed}</td>
+                    <td style={{ fontWeight: 700, color: t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                      {t.equal_var_not_assumed?.sig_2_tailed}
+                    </td>
                     <td>{t.equal_var_not_assumed?.mean_diff}</td>
                     <td>{t.equal_var_not_assumed?.se_diff}</td>
+                    <td>{t.equal_var_not_assumed?.ci_lower}</td>
+                    <td>{t.equal_var_not_assumed?.ci_upper}</td>
                   </tr>
                 </React.Fragment>
               ))}
@@ -2160,11 +2238,12 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <th>Mean Square</th>
                 <th>F</th>
                 <th>Sig.</th>
+                <th>Partial Eta Squared</th>
               </tr>
             </thead>
             <tbody>
               {data.between_subjects_effects?.map((row: any, i: number) => (
-                <tr key={i} className={row.source === 'Total' ? 'spss-pivot-total-row' : ''}>
+                <tr key={i} className={row.source === 'Total' || row.source === 'Corrected Total' ? 'spss-pivot-total-row' : ''}>
                   <td className="align-left" style={{ fontWeight: 600 }}>{row.source}</td>
                   <td>{row.sum_of_squares?.toLocaleString()}</td>
                   <td>{row.df}</td>
@@ -2173,11 +2252,17 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td style={{ fontWeight: row.sig !== null && row.sig < 0.05 ? 700 : 400, color: row.sig !== null && row.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
                     {row.sig !== null ? row.sig : '-'}
                   </td>
+                  <td>{row.partial_eta_squared !== null && row.partial_eta_squared !== undefined ? row.partial_eta_squared : '-'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="spss-pivot-notes">a. Dependent Variable: {data.dependent_variable}</div>
+          <div className="spss-pivot-notes">
+            <div>a. Dependent Variable: {data.dependent_variable}</div>
+            {data.r_squared !== undefined && (
+              <div>b. R Squared = {data.r_squared} (Adjusted R Squared = {data.adj_r_squared})</div>
+            )}
+          </div>
         </div>
       );
     }
@@ -2187,13 +2272,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       return (
         <div className="spss-pivot-table-wrapper">
           <div className="spss-pivot-title">Reliability Statistics</div>
-          <table className="spss-pivot-table" style={{ maxWidth: 420 }}>
+          <table className="spss-pivot-table" style={{ maxWidth: 320 }}>
             <thead>
               <tr>
                 <th>Cronbach's Alpha</th>
                 <th>N of Items</th>
-                <th>Scale Mean</th>
-                <th>Scale Variance</th>
               </tr>
             </thead>
             <tbody>
@@ -2202,11 +2285,34 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   {data.cronbach_alpha}
                 </td>
                 <td>{data.n_items}</td>
-                <td>{data.scale_mean}</td>
-                <td>{data.scale_variance}</td>
               </tr>
             </tbody>
           </table>
+
+          {/* Scale Statistics */}
+          {data.scale_mean !== undefined && (
+            <div style={{ marginTop: 16 }}>
+              <div className="spss-pivot-title">Scale Statistics</div>
+              <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+                <thead>
+                  <tr>
+                    <th>Mean</th>
+                    <th>Variance</th>
+                    <th>Std. Deviation</th>
+                    <th>N of Items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{data.scale_mean}</td>
+                    <td>{data.scale_variance}</td>
+                    <td>{Number(Math.sqrt(data.scale_variance || 0).toFixed(4))}</td>
+                    <td>{data.n_items}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {data.item_total_statistics && (
             <div style={{ marginTop: 16 }}>
@@ -2230,7 +2336,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td style={{ fontWeight: it.corrected_item_total_correlation > 0.3 ? 600 : 400 }}>
                         {it.corrected_item_total_correlation}
                       </td>
-                      <td style={{ fontWeight: 700 }}>{it.cronbach_alpha_if_deleted}</td>
+                      <td style={{ fontWeight: 700 }}>{it.cronbach_alpha_if_deleted ?? it.alpha_if_deleted}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2377,13 +2483,12 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       return (
         <div className="spss-pivot-table-wrapper">
           <div className="spss-pivot-title">Ranks</div>
-          <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
+          <table className="spss-pivot-table" style={{ maxWidth: 420 }}>
             <thead>
               <tr>
                 <th className="align-left">{data.group_variable}</th>
                 <th>N</th>
                 <th>Mean Rank</th>
-                <th>Sum of Ranks</th>
               </tr>
             </thead>
             <tbody>
@@ -2392,9 +2497,13 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td className="align-left" style={{ fontWeight: 600 }}>{r.group}</td>
                   <td>{r.n}</td>
                   <td>{r.mean_rank}</td>
-                  <td>{r.sum_of_ranks}</td>
                 </tr>
               ))}
+              <tr className="spss-pivot-total-row">
+                <td className="align-left" style={{ fontWeight: 600 }}>Total</td>
+                <td>{data.ranks?.reduce((acc: number, r: any) => acc + (r.n || 0), 0)}</td>
+                <td></td>
+              </tr>
             </tbody>
           </table>
 
@@ -2402,7 +2511,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           <table className="spss-pivot-table" style={{ maxWidth: 360 }}>
             <thead>
               <tr>
-                <th className="align-left">Statistic</th>
+                <th className="align-left"></th>
                 <th>{data.test_variable}</th>
               </tr>
             </thead>
@@ -2423,7 +2532,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               </tr>
             </tbody>
           </table>
-          <div className="spss-pivot-notes">a. Kruskal Wallis Test. Grouping Variable: {data.group_variable}</div>
+          <div className="spss-pivot-notes">
+            <div>a. Kruskal Wallis Test</div>
+            <div>b. Grouping Variable: {data.group_variable}</div>
+          </div>
         </div>
       );
     }
@@ -2708,8 +2820,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <tr key={i}>
                     <td className="align-left" style={{ fontWeight: 600 }}>{ve.component}</td>
                     <td style={{ fontWeight: ve.eigenvalue >= 1.0 ? 700 : 400 }}>{ve.eigenvalue}</td>
-                    <td>{ve.percent_of_variance}%</td>
-                    <td style={{ fontWeight: 700 }}>{ve.cumulative_percent}%</td>
+                    <td>{ve.percent_of_variance}</td>
+                    <td style={{ fontWeight: 700 }}>{ve.cumulative_percent}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2886,14 +2998,17 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             <table className="spss-pivot-table">
               <thead>
                 <tr>
-                  <th className="align-left">Variable</th>
-                  <th>B</th>
-                  <th>S.E.</th>
-                  <th>Wald</th>
-                  <th>df</th>
-                  <th>Sig.</th>
-                  <th>Exp(B)</th>
-                  <th>95% C.I. for EXP(B) Lower</th>
+                  <th className="align-left" rowSpan={2}>Variable</th>
+                  <th rowSpan={2}>B</th>
+                  <th rowSpan={2}>S.E.</th>
+                  <th rowSpan={2}>Wald</th>
+                  <th rowSpan={2}>df</th>
+                  <th rowSpan={2}>Sig.</th>
+                  <th rowSpan={2}>Exp(B)</th>
+                  <th colSpan={2} className="align-center">95% C.I. for EXP(B)</th>
+                </tr>
+                <tr>
+                  <th>Lower</th>
                   <th>Upper</th>
                 </tr>
               </thead>
