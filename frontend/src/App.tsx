@@ -18,6 +18,8 @@ import { AutomaticRecodeModal } from './components/AutomaticRecodeModal';
 import { ReplaceMissingModal } from './components/ReplaceMissingModal';
 import { AggregateModal } from './components/AggregateModal';
 import { MergeFilesModal } from './components/MergeFilesModal';
+import { InsertCasesDialog } from './components/InsertCasesDialog';
+import { parseExcelCell, sanitizeSpssVarName, createDefaultVariableMeta } from './utils/clipboardUtils';
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
@@ -47,6 +49,7 @@ export const App: React.FC = () => {
   // Jump / Focus navigation state
   const [showGoToCase, setShowGoToCase] = useState<boolean>(false);
   const [showFindReplace, setShowFindReplace] = useState<boolean>(false);
+  const [showInsertCases, setShowInsertCases] = useState<boolean>(false);
   const [focusTarget, setFocusTarget] = useState<{ row: number; col?: number; timestamp: number } | null>(null);
 
   // Undo / Redo history engine (50 snapshots)
@@ -327,32 +330,68 @@ export const App: React.FC = () => {
     setDataset({ ...dataset, variables: currentVars, rows: updatedRows });
   };
 
-  // High-performance bulk paste from Excel / Clipboard
-  const handleBulkPaste = (startRow: number, startCol: number, matrix: string[][]) => {
+  // High-performance bulk paste from Excel / Clipboard (supports Paste with Variable Names and locale numbers)
+  const handleBulkPaste = (
+    startRow: number,
+    startCol: number,
+    matrix: string[][],
+    withVariableNames = false
+  ) => {
+    if (!matrix || matrix.length === 0) return;
     pushHistory(dataset);
-    let currentVars = [...dataset.variables];
-    const maxColNeeded = startCol + Math.max(...matrix.map((r) => r.length), 1);
 
-    while (currentVars.length < maxColNeeded) {
-      const varNum = currentVars.length + 1;
-      const newVarName = `VAR0000${varNum}`.slice(-8);
-      currentVars.push({
-        name: newVarName,
-        type: 'Numeric',
-        width: 8,
-        decimals: 2,
-        label: '',
-        values: {},
-        missing: 'None',
-        columns: 8,
-        align: 'Right',
-        measure: 'Scale',
-        role: 'Input',
+    let currentVars = [...dataset.variables];
+    let dataMatrix = matrix;
+
+    // 1. If pasting with variable names (Ctrl+Alt+V or selected from menu)
+    if (withVariableNames && matrix.length > 0) {
+      const headerRow = matrix[0];
+      dataMatrix = matrix.slice(1);
+      const existingNames = currentVars.map((v) => v.name);
+
+      headerRow.forEach((hName, cOffset) => {
+        const cIdx = startCol + cOffset;
+        const sanitized = sanitizeSpssVarName(hName, existingNames, cIdx);
+        existingNames.push(sanitized);
+
+        if (cIdx < currentVars.length) {
+          const oldVar = currentVars[cIdx];
+          currentVars[cIdx] = {
+            ...oldVar,
+            name: sanitized,
+            label: oldVar.label || hName.trim(),
+          };
+        } else {
+          currentVars.push(createDefaultVariableMeta(sanitized, 'Numeric'));
+        }
       });
     }
 
+    // 2. Ensure enough variables exist for all columns in dataMatrix
+    const maxColNeeded = startCol + Math.max(...dataMatrix.map((r) => r.length), 1);
+    while (currentVars.length < maxColNeeded) {
+      const colOffset = currentVars.length - startCol;
+      let numericCount = 0;
+      let nonBlankCount = 0;
+      dataMatrix.forEach((r) => {
+        if (colOffset >= 0 && colOffset < r.length) {
+          const val = r[colOffset]?.trim();
+          if (val && val !== '.' && val !== '') {
+            nonBlankCount++;
+            if (parseExcelCell(val).isNumeric) numericCount++;
+          }
+        }
+      });
+
+      const isMostlyNumeric = nonBlankCount === 0 || numericCount / nonBlankCount >= 0.7;
+      const varNum = currentVars.length + 1;
+      const newVarName = `VAR0000${varNum}`.slice(-8);
+      currentVars.push(createDefaultVariableMeta(newVarName, isMostlyNumeric ? 'Numeric' : 'String'));
+    }
+
+    // 3. Ensure enough rows exist in dataset
     const updatedRows = [...dataset.rows];
-    const maxRowNeeded = startRow + matrix.length;
+    const maxRowNeeded = startRow + dataMatrix.length;
     while (updatedRows.length < maxRowNeeded) {
       const newRow: Record<string, any> = { id: updatedRows.length + 1 };
       currentVars.forEach((v) => {
@@ -361,20 +400,16 @@ export const App: React.FC = () => {
       updatedRows.push(newRow);
     }
 
-    matrix.forEach((rowVals, rOffset) => {
+    // 4. Fill cells with smart locale-aware value parsing
+    dataMatrix.forEach((rowVals, rOffset) => {
       const rIdx = startRow + rOffset;
       const rowObj = { ...updatedRows[rIdx] };
       rowVals.forEach((valStr, cOffset) => {
         const cIdx = startCol + cOffset;
         const vMeta = currentVars[cIdx];
         if (vMeta) {
-          const trimmed = valStr.trim();
-          if (trimmed === '') {
-            rowObj[vMeta.name] = null;
-          } else {
-            const num = parseFloat(trimmed.replace(/[$,]/g, ''));
-            rowObj[vMeta.name] = !isNaN(num) && isFinite(num) ? num : trimmed;
-          }
+          const { value } = parseExcelCell(valStr);
+          rowObj[vMeta.name] = value;
         }
       });
       updatedRows[rIdx] = rowObj;
@@ -385,6 +420,42 @@ export const App: React.FC = () => {
       variables: currentVars,
       rows: updatedRows,
     });
+  };
+
+  // Insert multiple cases (from InsertCasesDialog or menu)
+  const handleInsertCases = (
+    count: number,
+    position: 'before' | 'after' | 'end' = 'end',
+    targetIndex = 0
+  ) => {
+    if (count <= 0) return;
+    pushHistory(dataset);
+
+    const newRowsToInsert: Record<string, any>[] = [];
+    for (let i = 0; i < count; i++) {
+      const rowObj: Record<string, any> = {};
+      dataset.variables.forEach((v) => {
+        rowObj[v.name] = v.type === 'Numeric' || v.type === 'Dollar' ? null : '';
+      });
+      newRowsToInsert.push(rowObj);
+    }
+
+    let finalRows = [...dataset.rows];
+    if (position === 'end') {
+      finalRows = [...finalRows, ...newRowsToInsert];
+    } else if (position === 'before') {
+      const insertIdx = Math.max(0, Math.min(finalRows.length, targetIndex));
+      finalRows.splice(insertIdx, 0, ...newRowsToInsert);
+    } else if (position === 'after') {
+      const insertIdx = Math.max(0, Math.min(finalRows.length, targetIndex + 1));
+      finalRows.splice(insertIdx, 0, ...newRowsToInsert);
+    }
+
+    finalRows.forEach((r, idx) => {
+      r.id = idx + 1;
+    });
+
+    setDataset({ ...dataset, rows: finalRows });
   };
 
   // Start a new blank dataset (File -> New -> Data)
@@ -430,6 +501,26 @@ export const App: React.FC = () => {
     const indexSet = new Set(rowIndices);
     const updatedRows = dataset.rows.filter((_, i) => !indexSet.has(i));
     setDataset({ ...dataset, rows: updatedRows });
+  };
+
+  // Delete multiple variables by indices (e.g. from Variable View multi-selection)
+  const handleDeleteVariables = (indices: number[]) => {
+    if (indices.length === 0) return;
+    pushHistory(dataset);
+    const indexSet = new Set(indices);
+    const varsToDelete = dataset.variables.filter((_, i) => indexSet.has(i));
+    const namesToDelete = new Set(varsToDelete.map((v) => v.name));
+    const newVars = dataset.variables.filter((_, i) => !indexSet.has(i));
+
+    const updatedRows = dataset.rows.map((row) => {
+      const copy = { ...row };
+      namesToDelete.forEach((name) => {
+        delete copy[name];
+      });
+      return copy;
+    });
+
+    setDataset({ ...dataset, variables: newVars, rows: updatedRows });
   };
 
   // Add variable
@@ -798,6 +889,8 @@ export const App: React.FC = () => {
           setActiveView('data');
           setShowFindReplace(true);
         }}
+        onOpenInsertCasesModal={() => setShowInsertCases(true)}
+        onInsertVariable={handleAddVariable}
       />
 
       {/* 3. Toolbar */}
@@ -843,6 +936,7 @@ export const App: React.FC = () => {
               onSwitchToVariableView={(varName) => {
                 setActiveView('variable');
               }}
+              onOpenInsertCasesModal={() => setShowInsertCases(true)}
               focusTarget={focusTarget}
             />
           )}
@@ -857,6 +951,7 @@ export const App: React.FC = () => {
               }}
               onAddVariable={handleAddVariable}
               onDeleteVariable={handleDeleteVariable}
+              onDeleteVariables={handleDeleteVariables}
               onReorderVariables={handleReorderVariables}
             />
           )}
@@ -1063,6 +1158,19 @@ export const App: React.FC = () => {
           onClose={() => setShowGoToCase(false)}
           onGoTo={(targetRow, targetCol) => {
             setFocusTarget({ row: targetRow, col: targetCol, timestamp: Date.now() });
+          }}
+        />
+      )}
+
+      {/* Insert Cases Dialog */}
+      {showInsertCases && (
+        <InsertCasesDialog
+          currentCaseNumber={(focusTarget?.row ?? 0) + 1}
+          totalRows={dataset.rows.length}
+          isOpen={showInsertCases}
+          onClose={() => setShowInsertCases(false)}
+          onInsert={(cnt, pos, targetIdx) => {
+            handleInsertCases(cnt, pos, targetIdx);
           }}
         />
       )}

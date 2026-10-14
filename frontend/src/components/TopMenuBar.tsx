@@ -32,6 +32,8 @@ interface TopMenuBarProps {
   canRedo?: boolean;
   onGoToCase?: () => void;
   onFindReplace?: () => void;
+  onOpenInsertCasesModal?: () => void;
+  onInsertVariable?: () => void;
   recentFiles?: string[];
   onSelectRecentFile?: (filename: string) => void;
 }
@@ -50,6 +52,8 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
   canRedo,
   onGoToCase,
   onFindReplace,
+  onOpenInsertCasesModal,
+  onInsertVariable,
   recentFiles,
   onSelectRecentFile,
 }) => {
@@ -204,11 +208,60 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
               <span className="spss-dropdown-shortcut">Ctrl+Y</span>
             </div>
             <div className="spss-dropdown-divider" />
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onSetActiveView('variable'))}>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                handleAction(() => {
+                  alert('To paste data from Excel: Click any cell on Data View and press Ctrl+V.');
+                });
+              }}
+            >
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> Paste (from Excel)
+              </div>
+              <span className="spss-dropdown-shortcut">Ctrl+V</span>
+            </div>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                handleAction(() => {
+                  alert('To paste table with variable names: Click row 1 on Data View and press Ctrl+Alt+V.');
+                });
+              }}
+            >
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> Paste with Variable Names
+              </div>
+              <span className="spss-dropdown-shortcut">Ctrl+Alt+V</span>
+            </div>
+            <div className="spss-dropdown-divider" />
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onOpenInsertCasesModal) {
+                  handleAction(onOpenInsertCasesModal);
+                }
+              }}
+            >
+              <div className="spss-dropdown-item-left">
+                <Table size={14} /> Insert Cases...
+              </div>
+            </div>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onInsertVariable) {
+                  handleAction(onInsertVariable);
+                } else {
+                  handleAction(() => onSetActiveView('variable'));
+                }
+              }}
+            >
               <div className="spss-dropdown-item-left">
                 <Sliders size={14} /> Insert Variable
               </div>
             </div>
+            <div className="spss-dropdown-divider" />
             <div
               className="spss-dropdown-item"
               onClick={() => {
@@ -297,6 +350,29 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             </div>
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('value_labels'))}>
               Value Labels Editor...
+            </div>
+            <div className="spss-dropdown-divider" />
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onOpenInsertCasesModal) {
+                  handleAction(onOpenInsertCasesModal);
+                }
+              }}
+            >
+              Insert Cases...
+            </div>
+            <div
+              className="spss-dropdown-item"
+              onClick={() => {
+                if (onInsertVariable) {
+                  handleAction(onInsertVariable);
+                } else {
+                  handleAction(() => onSetActiveView('variable'));
+                }
+              }}
+            >
+              Insert Variable...
             </div>
             <div className="spss-dropdown-divider" />
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('sort_cases'))}>

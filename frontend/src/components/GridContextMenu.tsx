@@ -8,6 +8,7 @@ import {
   ArrowUp,
   ArrowDown,
   BarChart2,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 export interface GridContextMenuProps {
@@ -16,13 +17,17 @@ export interface GridContextMenuProps {
   type: 'cell' | 'row' | 'col';
   varName?: string;
   caseNumber?: number;
+  selectedRowCount?: number;
+  selectedColCount?: number;
   onClose: () => void;
   onCut: () => void;
   onCopy: () => void;
   onPaste: () => void;
+  onPasteWithVariableNames?: () => void;
   onClear: () => void;
   onInsertVariable: () => void;
   onInsertCases: () => void;
+  onOpenInsertCasesModal?: () => void;
   onDeleteRow?: () => void;
   onDeleteCol?: () => void;
   onSortAscending: () => void;
@@ -36,13 +41,17 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
   type,
   varName,
   caseNumber,
+  selectedRowCount = 1,
+  selectedColCount = 1,
   onClose,
   onCut,
   onCopy,
   onPaste,
+  onPasteWithVariableNames,
   onClear,
   onInsertVariable,
   onInsertCases,
+  onOpenInsertCasesModal,
   onDeleteRow,
   onDeleteCol,
   onSortAscending,
@@ -73,10 +82,15 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
   }, [onClose]);
 
   // Adjust coordinates to ensure menu stays within viewport
-  const menuWidth = 210;
-  const menuHeight = 280;
+  const menuWidth = 230;
+  const menuHeight = 340;
   const adjustedX = Math.min(x, window.innerWidth - menuWidth - 8);
   const adjustedY = Math.min(y, window.innerHeight - menuHeight - 8);
+
+  const deleteCaseLabel =
+    selectedRowCount > 1 ? `Delete Selected Cases (${selectedRowCount})` : 'Delete Case';
+  const deleteColLabel =
+    selectedColCount > 1 ? `Delete Selected Variables (${selectedColCount})` : 'Delete Variable';
 
   return (
     <div
@@ -87,12 +101,17 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         left: `${adjustedX}px`,
         top: `${adjustedY}px`,
         zIndex: 9999,
+        minWidth: menuWidth,
       }}
     >
       {/* Header Info */}
       <div className="spss-context-header">
         {type === 'col' && varName ? `Variable: ${varName}` : null}
-        {type === 'row' && caseNumber !== undefined ? `Case: ${caseNumber}` : null}
+        {type === 'row' && caseNumber !== undefined
+          ? selectedRowCount > 1
+            ? `Cases: ${selectedRowCount} selected`
+            : `Case: ${caseNumber}`
+          : null}
         {type === 'cell' && varName ? `${caseNumber} : ${varName}` : null}
       </div>
 
@@ -131,9 +150,24 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         }}
       >
         <Clipboard size={14} className="spss-context-icon" />
-        <span className="spss-context-label">Paste</span>
+        <span className="spss-context-label">Paste (from Excel)</span>
         <span className="spss-context-shortcut">Ctrl+V</span>
       </button>
+
+      {onPasteWithVariableNames && (
+        <button
+          className="spss-context-item"
+          onClick={() => {
+            onPasteWithVariableNames();
+            onClose();
+          }}
+          title="Paste table from Excel using first row as variable names"
+        >
+          <FileSpreadsheet size={14} className="spss-context-icon" />
+          <span className="spss-context-label">Paste with Variable Names</span>
+          <span className="spss-context-shortcut">Ctrl+Alt+V</span>
+        </button>
+      )}
 
       <button
         className="spss-context-item"
@@ -143,9 +177,11 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         }}
       >
         <Trash2 size={14} className="spss-context-icon" />
-        <span className="spss-context-label">Clear</span>
+        <span className="spss-context-label">Clear Cell Contents</span>
         <span className="spss-context-shortcut">Delete</span>
       </button>
+
+      <div className="spss-context-separator" />
 
       {/* Structural Insert & Delete Actions */}
       <button
@@ -167,34 +203,49 @@ export const GridContextMenu: React.FC<GridContextMenuProps> = ({
         }}
       >
         <PlusCircle size={14} className="spss-context-icon" />
-        <span className="spss-context-label">Insert Cases</span>
+        <span className="spss-context-label">Insert 1 Case</span>
       </button>
+
+      {onOpenInsertCasesModal && (
+        <button
+          className="spss-context-item"
+          onClick={() => {
+            onOpenInsertCasesModal();
+            onClose();
+          }}
+        >
+          <PlusCircle size={14} className="spss-context-icon" />
+          <span className="spss-context-label">Insert Cases...</span>
+        </button>
+      )}
 
       {type === 'row' && onDeleteRow && (
         <button
           className="spss-context-item"
-          style={{ color: 'var(--danger)' }}
+          style={{ color: 'var(--danger)', fontWeight: 500 }}
           onClick={() => {
             onDeleteRow();
             onClose();
           }}
         >
           <Trash2 size={14} className="spss-context-icon" />
-          <span className="spss-context-label">Delete Case</span>
+          <span className="spss-context-label">{deleteCaseLabel}</span>
+          <span className="spss-context-shortcut">Delete</span>
         </button>
       )}
 
       {type === 'col' && onDeleteCol && (
         <button
           className="spss-context-item"
-          style={{ color: 'var(--danger)' }}
+          style={{ color: 'var(--danger)', fontWeight: 500 }}
           onClick={() => {
             onDeleteCol();
             onClose();
           }}
         >
           <Trash2 size={14} className="spss-context-icon" />
-          <span className="spss-context-label">Delete Variable</span>
+          <span className="spss-context-label">{deleteColLabel}</span>
+          <span className="spss-context-shortcut">Delete</span>
         </button>
       )}
 

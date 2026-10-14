@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { VariableMeta } from '../types/spss';
 import { GridContextMenu } from './GridContextMenu';
+import { parseClipboardMatrix } from '../utils/clipboardUtils';
 
 interface SelectionRange {
   startRow: number;
@@ -23,7 +24,7 @@ interface DataViewGridProps {
   rows: Record<string, any>[];
   showValueLabels: boolean;
   onCellChange: (rowIndex: number, varName: string, value: any) => void;
-  onBulkPaste?: (startRow: number, startCol: number, matrix: string[][]) => void;
+  onBulkPaste?: (startRow: number, startCol: number, matrix: string[][], withVariableNames?: boolean) => void;
   onAddRow: () => void;
   onAddVariable: () => void;
   onInsertRow?: (beforeIndex: number) => void;
@@ -36,6 +37,7 @@ interface DataViewGridProps {
   onSortCases?: (varName: string, ascending: boolean) => void;
   onQuickDescriptives?: (varName: string) => void;
   onSwitchToVariableView: (varName?: string) => void;
+  onOpenInsertCasesModal?: () => void;
   focusTarget?: { row: number; col?: number; timestamp: number } | null;
 }
 
@@ -57,6 +59,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   onSortCases,
   onQuickDescriptives,
   onSwitchToVariableView,
+  onOpenInsertCasesModal,
   focusTarget,
 }) => {
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number }>({ row: 0, col: 0 });
@@ -76,6 +79,10 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const isMouseDownRef = useRef<boolean>(false);
+  const isRowDraggingRef = useRef<boolean>(false);
+  const lastRowAnchorRef = useRef<number | null>(0);
+  const lastColAnchorRef = useRef<number | null>(0);
 
   // Guarantee at least 50 visible rows for data entry (authentic SPSS behavior)
   const displayRowCount = Math.max(50, rows.length);
@@ -149,11 +156,10 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     };
   }, [resizingCol, variables, onResizeColumn]);
 
-  const isMouseDownRef = useRef<boolean>(false);
-
   useEffect(() => {
     const handleGlobalMouseUp = () => {
       isMouseDownRef.current = false;
+      isRowDraggingRef.current = false;
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
@@ -165,6 +171,8 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     setSelectionRange({ startRow: rIdx, startCol: cIdx, endRow: rIdx, endCol: cIdx });
     setSelectedRows([rIdx]);
     setSelectionType('cell');
+    lastRowAnchorRef.current = rIdx;
+    lastColAnchorRef.current = cIdx;
   };
 
   const extendSelection = (targetRow: number, targetCol: number) => {
@@ -199,7 +207,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     }
   };
 
-  // Handle full row selection with optional multi-select (Ctrl+Click)
+  // Handle full row selection with Shift+Click and Drag support (authentic SPSS behavior)
   const selectFullRow = (rIdx: number, isMulti = false) => {
     setSelectedCell({ row: rIdx, col: 0 });
     if (isMulti) {
@@ -219,7 +227,58 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     setSelectionType('row');
   };
 
-  // Handle full column selection
+  const handleRowHeaderMouseDown = (rIdx: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+
+    if (e.shiftKey && lastRowAnchorRef.current !== null) {
+      // Shift + Click: Select range of rows from anchor to clicked row
+      const start = Math.min(lastRowAnchorRef.current, rIdx);
+      const end = Math.max(lastRowAnchorRef.current, rIdx);
+      const rangeRows: number[] = [];
+      for (let r = start; r <= end; r++) rangeRows.push(r);
+      setSelectedRows(rangeRows);
+      setSelectedCell({ row: rIdx, col: 0 });
+      setSelectionRange({
+        startRow: start,
+        startCol: 0,
+        endRow: end,
+        endCol: Math.max(0, variables.length - 1),
+      });
+      setSelectionType('row');
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl + Click: Toggle individual row
+      lastRowAnchorRef.current = rIdx;
+      selectFullRow(rIdx, true);
+      return;
+    }
+
+    // Normal click & start of mouse drag
+    lastRowAnchorRef.current = rIdx;
+    isRowDraggingRef.current = true;
+    selectFullRow(rIdx, false);
+  };
+
+  const handleRowHeaderMouseEnter = (rIdx: number) => {
+    if (isRowDraggingRef.current && lastRowAnchorRef.current !== null) {
+      const start = Math.min(lastRowAnchorRef.current, rIdx);
+      const end = Math.max(lastRowAnchorRef.current, rIdx);
+      const rangeRows: number[] = [];
+      for (let r = start; r <= end; r++) rangeRows.push(r);
+      setSelectedRows(rangeRows);
+      setSelectionRange({
+        startRow: start,
+        startCol: 0,
+        endRow: end,
+        endCol: Math.max(0, variables.length - 1),
+      });
+      setSelectionType('row');
+    }
+  };
+
+  // Handle full column selection with Shift+Click support
   const selectFullColumn = (cIdx: number) => {
     setSelectedCell({ row: 0, col: cIdx });
     setSelectionRange({
@@ -229,6 +288,24 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
       endCol: cIdx,
     });
     setSelectionType('col');
+    lastColAnchorRef.current = cIdx;
+  };
+
+  const handleColHeaderClick = (cIdx: number, e: React.MouseEvent) => {
+    if (e.shiftKey && lastColAnchorRef.current !== null) {
+      const start = Math.min(lastColAnchorRef.current, cIdx);
+      const end = Math.max(lastColAnchorRef.current, cIdx);
+      setSelectedCell({ row: 0, col: cIdx });
+      setSelectionRange({
+        startRow: 0,
+        startCol: start,
+        endRow: Math.max(0, rows.length - 1),
+        endCol: end,
+      });
+      setSelectionType('col');
+      return;
+    }
+    selectFullColumn(cIdx);
   };
 
   // Check if a cell is inside the current selection range
@@ -271,10 +348,11 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     }
 
     let parsedVal: any = editValue.trim();
-    if (parsedVal === '') {
+    if (parsedVal === '' || parsedVal === '.') {
       parsedVal = null;
     } else if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-      const num = parseFloat(parsedVal.replace(/[$,]/g, ''));
+      const clean = parsedVal.replace(/[$,]/g, '').replace(',', '.');
+      const num = parseFloat(clean);
       parsedVal = isNaN(num) ? parsedVal : num;
     }
 
@@ -282,12 +360,27 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
     setEditingCell(null);
   };
 
-  // Clipboard operations
+  // Clipboard operations (Copy, Cut, Paste)
   const handleCopy = () => {
-    const minR = Math.min(selectionRange.startRow, selectionRange.endRow);
-    const maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
-    const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
-    const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+    let minR = Math.min(selectionRange.startRow, selectionRange.endRow);
+    let maxR = Math.max(selectionRange.startRow, selectionRange.endRow);
+    let minC = Math.min(selectionRange.startCol, selectionRange.endCol);
+    let maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
+
+    if (selectionType === 'row') {
+      const activeRows = selectedRows.length > 0 ? [...selectedRows].sort((a, b) => a - b) : [selectedCell.row];
+      const lines: string[] = [];
+      activeRows.forEach((r) => {
+        const rowVals: string[] = [];
+        variables.forEach((v) => {
+          const val = rows[r]?.[v.name];
+          rowVals.push(val !== undefined && val !== null ? String(val) : '');
+        });
+        lines.push(rowVals.join('\t'));
+      });
+      navigator.clipboard.writeText(lines.join('\r\n'));
+      return;
+    }
 
     const lines: string[] = [];
     for (let r = minR; r <= maxR; r++) {
@@ -304,39 +397,116 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   const handleCut = () => {
     handleCopy();
+    handleDelete();
+  };
+
+  // High-reliability Bulk Paste Executor
+  const executeBulkPaste = useCallback(
+    (text: string, withVariableNames = false) => {
+      if (!text || text.length === 0) return;
+      const matrix = parseClipboardMatrix(text);
+      if (matrix.length === 0) return;
+
+      const targetRow = Math.max(0, selectedCell.row);
+      const targetCol = Math.max(0, selectedCell.col);
+
+      if (onBulkPaste) {
+        onBulkPaste(targetRow, targetCol, matrix, withVariableNames);
+      }
+    },
+    [selectedCell, onBulkPaste]
+  );
+
+  // Native Paste Event Listener on Window (Works 100% reliably in all browsers, zero permission prompts!)
+  useEffect(() => {
+    const handleNativePaste = (e: ClipboardEvent) => {
+      // If user is typing in a modal or non-grid input, let standard paste happen
+      if (e.target instanceof HTMLInputElement) {
+        if (inputRef.current && e.target === inputRef.current) {
+          // Editing inside cell input: check if clipboard has multi-cell TSV/CSV from Excel
+          const text = e.clipboardData?.getData('text/plain') || '';
+          if (text.includes('\t') || text.includes('\n')) {
+            // Multi-cell Excel paste! Cancel single input and do matrix paste across the grid!
+            e.preventDefault();
+            setEditingCell(null);
+            executeBulkPaste(text, false);
+            return;
+          }
+          return; // Regular single-word paste inside the input box
+        }
+        return;
+      }
+      if (e.target instanceof HTMLTextAreaElement) return;
+
+      const text = e.clipboardData?.getData('text/plain');
+      if (!text || text.trim().length === 0) return;
+
+      e.preventDefault();
+      executeBulkPaste(text, false);
+    };
+
+    window.addEventListener('paste', handleNativePaste);
+    return () => window.removeEventListener('paste', handleNativePaste);
+  }, [executeBulkPaste]);
+
+  // Fallback for button / menu triggers using navigator.clipboard
+  const handlePaste = (withVariableNames = false) => {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard
+        .readText()
+        .then((text) => {
+          if (!text) return;
+          executeBulkPaste(text, withVariableNames);
+        })
+        .catch(() => {
+          // If browser restricts readText without prompt, notify user to use Ctrl+V
+          alert('Please click on the grid cell and press Ctrl+V to paste directly from Excel.');
+        });
+    } else {
+      alert('Please click on the grid cell and press Ctrl+V to paste directly from Excel.');
+    }
+  };
+
+  // Smart Delete Engine (Identical to IBM SPSS Statistics)
+  // - If Row(s) selected: DELETE CASES from dataset!
+  // - If Col(s) selected: DELETE VARIABLES from dataset!
+  // - If Cell(s) selected: CLEAR CELL CONTENTS to System-Missing (.)!
+  const handleDelete = () => {
+    if (selectionType === 'row') {
+      const rowsToDelete = (selectedRows.length > 0 ? selectedRows : [selectedCell.row]).filter(
+        (r) => r >= 0 && r < rows.length
+      );
+      if (rowsToDelete.length > 0) {
+        if (onDeleteRows) {
+          onDeleteRows(rowsToDelete);
+        } else if (onDeleteRow) {
+          onDeleteRow(rowsToDelete[0]);
+        }
+        const minDeleted = Math.min(...rowsToDelete);
+        const remainingCount = Math.max(0, rows.length - rowsToDelete.length);
+        const newActiveRow = Math.min(minDeleted, Math.max(0, remainingCount - 1));
+        selectSingleCell(newActiveRow, selectedCell.col);
+        return;
+      }
+    }
+
+    if (selectionType === 'col') {
+      const colIdx = selectedCell.col;
+      const vMeta = variables[colIdx];
+      if (vMeta && onDeleteVariable) {
+        onDeleteVariable(vMeta.name);
+        const newActiveCol = Math.min(colIdx, Math.max(0, variables.length - 2));
+        selectSingleCell(selectedCell.row, Math.max(0, newActiveCol));
+        return;
+      }
+    }
+
+    // Cell selection: Clear cell contents
     handleClearSelection();
   };
 
-  const handlePaste = () => {
-    navigator.clipboard.readText().then((text) => {
-      if (!text) return;
-      const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-      const matrix = lines.map((l) => l.split('\t'));
-      if (onBulkPaste) {
-        onBulkPaste(selectedCell.row, selectedCell.col, matrix);
-      } else {
-        lines.forEach((line, rOffset) => {
-          const rIdx = selectedCell.row + rOffset;
-          const cells = line.split('\t');
-          cells.forEach((cellVal, cOffset) => {
-            const cIdx = selectedCell.col + cOffset;
-            if (cIdx < variables.length) {
-              const varMeta = variables[cIdx];
-              let parsed: any = cellVal.trim();
-              if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
-                const num = parseFloat(parsed.replace(/[$,]/g, ''));
-                parsed = isNaN(num) ? parsed : num;
-              }
-              onCellChange(rIdx, varMeta.name, parsed);
-            }
-          });
-        });
-      }
-    });
-  };
-
   const handleClearSelection = () => {
-    if (selectionType === 'row' && selectedRows.length > 1) {
+    if (selectionType === 'row' && selectedRows.length > 0) {
       selectedRows.forEach((r) => {
         variables.forEach((v) => {
           onCellChange(r, v.name, null);
@@ -366,6 +536,10 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   // Keyboard navigation & clipboard shortcuts on grid
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If typing in a modal or outside grid container, don't intercept
+      if (e.target instanceof HTMLInputElement && e.target !== inputRef.current) return;
+      if (e.target instanceof HTMLTextAreaElement) return;
+
       if (editingCell) {
         if (e.key === 'Enter') {
           const nextRow = selectedCell.row + 1;
@@ -377,14 +551,12 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
           e.preventDefault();
           commitEdit();
           if (e.shiftKey) {
-            // Shift+Tab: Move left, or wrap up to previous row
             if (selectedCell.col > 0) {
               selectSingleCell(selectedCell.row, selectedCell.col - 1);
             } else if (selectedCell.row > 0) {
               selectSingleCell(selectedCell.row - 1, Math.max(0, variables.length - 1));
             }
           } else {
-            // Tab: Move right, or wrap to next row
             if (selectedCell.col < variables.length - 1) {
               selectSingleCell(selectedCell.row, selectedCell.col + 1);
             } else {
@@ -395,7 +567,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         return;
       }
 
-      // Ctrl+A: Select All (Entire Dataset)
+      // Ctrl+A: Select All
       if (e.ctrlKey && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault();
         setSelectedCell({ row: 0, col: 0 });
@@ -493,26 +665,34 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
       }
 
       // Clipboard Copy (Ctrl+C)
-      if (e.ctrlKey && e.key === 'c') {
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'c') {
         handleCopy();
         return;
       }
 
       // Clipboard Cut (Ctrl+X)
-      if (e.ctrlKey && e.key === 'x') {
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'x') {
         handleCut();
         return;
       }
 
-      // Clipboard Paste (Ctrl+V)
-      if (e.ctrlKey && e.key === 'v') {
-        handlePaste();
+      // Paste with Variable Names (Ctrl+Alt+V) ala IBM SPSS
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        handlePaste(true);
         return;
       }
 
-      // Delete key clears selection
+      // Standard Paste (Ctrl+V) fallback if browser paste doesn't fire
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'v') {
+        handlePaste(false);
+        return;
+      }
+
+      // Delete key: SMART DELETE (Cases / Variables / Cells)
       if (e.key === 'Delete') {
-        handleClearSelection();
+        e.preventDefault();
+        handleDelete();
         return;
       }
 
@@ -524,19 +704,17 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         const minC = Math.min(selectionRange.startCol, selectionRange.endCol);
         const maxC = Math.max(selectionRange.startCol, selectionRange.endCol);
 
-        if (minR < maxR) {
-          // Range selection: fill top row down to all selected rows
-          for (let r = minR + 1; r <= maxR; r++) {
-            for (let c = minC; c <= maxC; c++) {
-              const varMeta = variables[c];
-              if (varMeta) {
-                const topVal = rows[minR]?.[varMeta.name];
-                onCellChange(r, varMeta.name, topVal !== undefined ? topVal : null);
+        if (maxR > minR) {
+          for (let c = minC; c <= maxC; c++) {
+            const varMeta = variables[c];
+            if (varMeta) {
+              const sourceVal = rows[minR]?.[varMeta.name];
+              for (let r = minR + 1; r <= maxR; r++) {
+                onCellChange(r, varMeta.name, sourceVal !== undefined ? sourceVal : null);
               }
             }
           }
         } else {
-          // Single cell selection: copy selected cell to row immediately below
           if (variables[selectedCell.col]) {
             const varName = variables[selectedCell.col].name;
             const currentVal = rows[selectedCell.row]?.[varName];
@@ -547,7 +725,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
         return;
       }
 
-      // Not editing - navigate
+      // Not editing - navigation
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         selectSingleCell(Math.max(0, selectedCell.row - 1), selectedCell.col);
@@ -583,7 +761,20 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingCell, selectedCell, selectionRange, variables, rows, editValue, displayRowCount]);
+  }, [
+    editingCell,
+    selectedCell,
+    selectionRange,
+    selectionType,
+    selectedRows,
+    variables,
+    rows,
+    editValue,
+    displayRowCount,
+    onDeleteRows,
+    onDeleteRow,
+    onDeleteVariable,
+  ]);
 
   const isSystemMissing = (val: any, varMeta: VariableMeta) => {
     if (val === undefined || val === null || val === '') {
@@ -595,7 +786,6 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
   // Helper to format cell display
   const formatCellValue = (val: any, varMeta: VariableMeta) => {
     if (val === undefined || val === null || val === '') {
-      // In IBM SPSS, numeric system-missing values are displayed as '.'
       if (varMeta.type === 'Numeric' || varMeta.type === 'Dollar') {
         return '.';
       }
@@ -655,6 +845,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
   const activeVar = variables[selectedCell.col];
   const activeVal = rows[selectedCell.row]?.[activeVar?.name];
+  const selectedRowCount = selectionType === 'row' ? selectedRows.length : 1;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden' }}>
@@ -667,8 +858,13 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
           {activeVal !== undefined && activeVal !== null ? String(activeVal) : ''}
           {activeVar?.label && <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>({activeVar.label})</span>}
         </div>
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
-          <span>Virtual Rows: {rows.length.toLocaleString()}</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, fontSize: 11, color: 'var(--text-muted)' }}>
+          {selectionType === 'row' && selectedRows.length > 1 && (
+            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+              {selectedRows.length} Cases Selected (Press Delete to remove)
+            </span>
+          )}
+          <span>Total Cases: {rows.length.toLocaleString()}</span>
         </div>
       </div>
 
@@ -692,14 +888,14 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                 title="Select All (Ctrl+A)"
               />
               {variables.map((v, cIdx) => {
-                const isColSelected = selectionType === 'col' && selectedCell.col === cIdx;
+                const isColSelected = selectionType === 'col' && isCellInRange(0, cIdx);
                 const colWidth = customColWidths[v.name] || Math.max(90, v.columns * 11);
                 return (
                   <th
                     key={v.name}
                     className={`spss-grid-th ${isColSelected ? 'selected-full-col' : ''}`}
                     style={{ width: colWidth, minWidth: 50 }}
-                    onClick={() => selectFullColumn(cIdx)}
+                    onClick={(e) => handleColHeaderClick(cIdx, e)}
                     onDoubleClick={() => onSwitchToVariableView(v.name)}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -712,7 +908,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                         targetCol: cIdx,
                       });
                     }}
-                    title={`Column ${v.name} (Right-click for options, Double-click for Variable View)`}
+                    title={`Column ${v.name} (Shift+Click to multi-select, Right-click for options, Double-click for Variable View)`}
                   >
                     <div className="spss-var-header-content">
                       {renderMeasureIcon(v.measure)}
@@ -754,7 +950,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               </tr>
             )}
 
-            {/* Virtualized Rows */}
+            {/* Virtualized Visible Rows */}
             {virtualRows.map((virtualRow) => {
               const rIdx = virtualRow.index;
               const row = rows[rIdx] || {};
@@ -766,12 +962,13 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
 
               return (
                 <tr key={rIdx} className={isFiltered ? 'filtered-case-row' : ''} style={{ height: 24 }}>
-                  {/* Row Header Number */}
+                  {/* Row Header Number with Shift+Click and Drag support */}
                   <td
                     className={`spss-grid-row-header ${isRowSelected ? 'selected-full-row' : ''} ${
                       isFiltered ? 'filtered-case' : ''
                     } ${selectedCell.row === rIdx ? 'active-row' : ''}`}
-                    onClick={(e) => selectFullRow(rIdx, e.ctrlKey || e.metaKey)}
+                    onMouseDown={(e) => handleRowHeaderMouseDown(rIdx, e)}
+                    onMouseEnter={() => handleRowHeaderMouseEnter(rIdx)}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       if (!selectedRows.includes(rIdx)) {
@@ -785,7 +982,11 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                         targetCol: selectedCell.col,
                       });
                     }}
-                    title={isFiltered ? `Case ${rIdx + 1} (Filtered out by filter_$)` : `Case ${rIdx + 1}`}
+                    title={
+                      isFiltered
+                        ? `Case ${rIdx + 1} (Filtered out by filter_$)`
+                        : `Case ${rIdx + 1} (Click to select, Shift+Click or Drag to multi-select, Delete key to remove)`
+                    }
                   >
                     {rIdx + 1}
                   </td>
@@ -795,6 +996,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                     const isSelected = selectedCell.row === rIdx && selectedCell.col === cIdx;
                     const inRange = isCellInRange(rIdx, cIdx);
                     const inMultiRow = selectionType === 'row' && selectedRows.includes(rIdx);
+                    const inMultiCol = selectionType === 'col' && isCellInRange(0, cIdx);
                     const isEditing = editingCell?.row === rIdx && editingCell?.col === cIdx;
                     const cellVal = row[v.name];
                     const alignClass = `align-${v.align.toLowerCase()}`;
@@ -804,7 +1006,9 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
                       <td
                         key={v.name}
                         className={`spss-grid-td ${alignClass} ${isSelected ? 'active' : ''} ${
-                          (inRange && !isSelected) || (inMultiRow && !isSelected) ? 'in-selection-range' : ''
+                          (inRange && !isSelected) || (inMultiRow && !isSelected) || (inMultiCol && !isSelected)
+                            ? 'in-selection-range'
+                            : ''
                         } ${isMissing ? 'system-missing' : ''}`}
                         onMouseDown={(e) => handleCellMouseDown(rIdx, cIdx, e)}
                         onMouseEnter={() => handleCellMouseEnter(rIdx, cIdx)}
@@ -849,22 +1053,23 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               </tr>
             )}
 
-            {/* Bottom Add Row row */}
-            <tr>
+            {/* Bottom Add Row Helper */}
+            <tr style={{ height: 24 }}>
               <td
                 className="spss-grid-row-header"
                 style={{ cursor: 'pointer', color: 'var(--accent)', fontWeight: 600 }}
                 onClick={onAddRow}
-                title="Add new row (case)"
+                title="Add 1 new case (or click Insert Cases for batch add)"
               >
-                *
+                +
               </td>
               {variables.map((v) => (
                 <td
                   key={v.name}
                   className="spss-grid-td"
-                  style={{ background: 'var(--bg-window)', cursor: 'pointer' }}
-                  onClick={onAddRow}
+                  style={{ background: 'rgba(59, 130, 246, 0.02)', cursor: 'pointer' }}
+                  onClick={() => selectSingleCell(rows.length, 0)}
+                  title="Click to enter data in new case"
                 />
               ))}
               <td className="spss-grid-td" style={{ background: 'var(--bg-window)' }} />
@@ -881,10 +1086,12 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
           type={contextMenu.type}
           varName={variables[contextMenu.targetCol]?.name}
           caseNumber={contextMenu.targetRow + 1}
+          selectedRowCount={selectedRowCount}
           onClose={() => setContextMenu(null)}
           onCut={handleCut}
           onCopy={handleCopy}
-          onPaste={handlePaste}
+          onPaste={() => handlePaste(false)}
+          onPasteWithVariableNames={() => handlePaste(true)}
           onClear={handleClearSelection}
           onInsertVariable={() => {
             if (onInsertVariable) {
@@ -900,6 +1107,7 @@ export const DataViewGrid: React.FC<DataViewGridProps> = ({
               onAddRow();
             }
           }}
+          onOpenInsertCasesModal={onOpenInsertCasesModal}
           onDeleteRow={() => {
             if (selectedRows.length > 1 && onDeleteRows) {
               onDeleteRows(selectedRows);

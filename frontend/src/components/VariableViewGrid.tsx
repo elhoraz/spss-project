@@ -10,6 +10,7 @@ interface VariableViewGridProps {
   onOpenValueLabels: (varName: string) => void;
   onAddVariable: () => void;
   onDeleteVariable: (index: number) => void;
+  onDeleteVariables?: (indices: number[]) => void;
   onReorderVariables?: (fromIndex: number, toIndex: number) => void;
 }
 
@@ -19,11 +20,14 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
   onOpenValueLabels,
   onAddVariable,
   onDeleteVariable,
+  onDeleteVariables,
   onReorderVariables,
 }) => {
   const [selectedTypeVarIdx, setSelectedTypeVarIdx] = useState<number | null>(null);
   const [selectedMissingVarIdx, setSelectedMissingVarIdx] = useState<number | null>(null);
   const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(0);
+  const [selectedVarRows, setSelectedVarRows] = useState<number[]>([0]);
+  const lastVarAnchorRef = useRef<number | null>(0);
   const [draggedRowIdx, setDraggedRowIdx] = useState<number | null>(null);
   const [dragOverRowIdx, setDragOverRowIdx] = useState<number | null>(null);
 
@@ -63,10 +67,62 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
   useEffect(() => {
     if (variables.length === 0) {
       setSelectedRowIdx(null);
+      setSelectedVarRows([]);
     } else if (selectedRowIdx !== null && selectedRowIdx >= variables.length) {
       setSelectedRowIdx(variables.length - 1);
+      setSelectedVarRows([variables.length - 1]);
     }
   }, [variables.length, selectedRowIdx]);
+
+  // Global Delete key handler for Variable View
+  useEffect(() => {
+    const handleGlobalDelete = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+
+      if (e.key === 'Delete') {
+        const rowsToDelete = selectedVarRows.length > 0 ? selectedVarRows : selectedRowIdx !== null ? [selectedRowIdx] : [];
+        if (rowsToDelete.length > 0) {
+          e.preventDefault();
+          if (rowsToDelete.length > 1 && onDeleteVariables) {
+            onDeleteVariables(rowsToDelete);
+          } else {
+            onDeleteVariable(rowsToDelete[0]);
+          }
+          const minIdx = Math.min(...rowsToDelete);
+          const nextIdx = Math.max(0, Math.min(variables.length - rowsToDelete.length - 1, minIdx));
+          setSelectedRowIdx(nextIdx);
+          setSelectedVarRows([nextIdx]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalDelete);
+    return () => window.removeEventListener('keydown', handleGlobalDelete);
+  }, [selectedVarRows, selectedRowIdx, variables.length, onDeleteVariables, onDeleteVariable]);
+
+  const handleRowHeaderClick = (idx: number, e: React.MouseEvent) => {
+    if (e.shiftKey && lastVarAnchorRef.current !== null) {
+      const start = Math.min(lastVarAnchorRef.current, idx);
+      const end = Math.max(lastVarAnchorRef.current, idx);
+      const range: number[] = [];
+      for (let r = start; r <= end; r++) range.push(r);
+      setSelectedVarRows(range);
+      setSelectedRowIdx(idx);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedVarRows((prev) => {
+        const next = prev.includes(idx) ? prev.filter((r) => r !== idx) : [...prev, idx];
+        return next.length > 0 ? next : [idx];
+      });
+      setSelectedRowIdx(idx);
+      lastVarAnchorRef.current = idx;
+      return;
+    }
+    setSelectedVarRows([idx]);
+    setSelectedRowIdx(idx);
+    lastVarAnchorRef.current = idx;
+  };
 
   const handleCopyAttributes = (idx: number) => {
     const target = variables[idx];
@@ -246,6 +302,33 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
 
         <div style={{ width: 1, height: 18, background: 'var(--border-header)', margin: '0 4px' }} />
 
+        {/* Delete Variable button */}
+        <button
+          className="spss-btn spss-btn-sm"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            color: 'var(--danger)',
+            borderColor: 'rgba(239, 68, 68, 0.3)',
+          }}
+          disabled={selectedRowIdx === null || !variables[selectedRowIdx]}
+          onClick={() => {
+            const rowsToDelete = selectedVarRows.length > 0 ? selectedVarRows : selectedRowIdx !== null ? [selectedRowIdx] : [];
+            if (rowsToDelete.length > 1 && onDeleteVariables) {
+              onDeleteVariables(rowsToDelete);
+            } else if (rowsToDelete.length > 0) {
+              onDeleteVariable(rowsToDelete[0]);
+            }
+          }}
+          title="Delete selected variable (Delete key)"
+        >
+          <Trash2 size={13} />
+          {selectedVarRows.length > 1 ? `Delete Variables (${selectedVarRows.length})` : 'Delete Variable'}
+        </button>
+
+        <div style={{ width: 1, height: 18, background: 'var(--border-header)', margin: '0 4px' }} />
+
         <button
           className="spss-btn spss-btn-sm"
           style={{ display: 'flex', alignItems: 'center', gap: 4 }}
@@ -336,21 +419,25 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
           </thead>
           <tbody>
             {variables.map((v, idx) => {
-              const isSelected = selectedRowIdx === idx;
+              const isSelected = selectedRowIdx === idx || selectedVarRows.includes(idx);
               const isDragOver = dragOverRowIdx === idx;
               return (
                 <tr
                   key={v.name || idx}
                   style={{
-                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.08)' : undefined,
+                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.12)' : undefined,
                     borderTop: isDragOver ? '2px solid var(--accent)' : undefined,
                   }}
-                  onClick={() => setSelectedRowIdx(idx)}
+                  onClick={(e) => handleRowHeaderClick(idx, e)}
                 >
                   {/* Row Number with Drag Handle */}
                   <td
                     className="spss-grid-row-header"
                     draggable
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRowHeaderClick(idx, e);
+                    }}
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', String(idx));
                       e.dataTransfer.effectAllowed = 'move';
