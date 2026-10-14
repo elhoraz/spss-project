@@ -24,7 +24,7 @@ import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
 import { statsApiService } from './services/api';
-import { exportReportToPdf, exportReportToWord, exportReportToExcel } from './utils/exportUtils';
+import { exportReportToPdf, exportReportToWord, exportReportToExcel, exportReportToHtml } from './utils/exportUtils';
 import { saveSessionToStorage, loadSessionFromStorage } from './utils/storage';
 
 export const App: React.FC = () => {
@@ -808,8 +808,13 @@ export const App: React.FC = () => {
     setActiveView('data');
   };
 
-  // Export functions (PDF, Word, Excel, CSV, Binary SPSS .sav, SPSS JSON)
-  const handleExport = async (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word') => {
+  // Export functions (PDF, Word, Excel, CSV, Binary SPSS .sav, SPSS JSON, HTML)
+  const handleExport = async (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word' | 'html') => {
+    if (format === 'html') {
+      exportReportToHtml(outputs, dataset.name);
+      return;
+    }
+
     if (format === 'pdf') {
       setActiveView('output');
       setTimeout(() => {

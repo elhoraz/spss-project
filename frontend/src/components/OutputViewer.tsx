@@ -12,8 +12,10 @@ import {
   ChevronRight,
   Copy,
   Check,
+  FileCode,
 } from 'lucide-react';
 import { OutputItem } from '../types/spss';
+import { copyTableElementToClipboard } from '../utils/exportUtils';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement } from 'chart.js';
 import { Bar, Pie, Line } from 'react-chartjs-2';
 
@@ -24,7 +26,7 @@ interface OutputViewerProps {
   outputs: OutputItem[];
   onClearOutputs: () => void;
   onDeleteOutputItem?: (id: string) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word' | 'html') => void;
 }
 
 // Chart Action Toolbar for Exporting as PNG or SVG
@@ -103,11 +105,11 @@ const ChartActionToolbar: React.FC<{
 // -------------------------------------------------------------
 // STANDARD IBM SPSS COLLAPSIBLE NOTES TABLE (FASE 8)
 // -------------------------------------------------------------
-const SPSSNotesTable: React.FC<{ item: OutputItem }> = ({ item }) => {
+const SPSSNotesTable: React.FC<{ item: OutputItem; id?: string }> = ({ item, id }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="spss-notes-container" style={{ marginBottom: 12 }}>
+    <div id={id || `output-${item.id}-notes`} className="spss-notes-container" style={{ marginBottom: 12 }}>
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -1385,36 +1387,289 @@ const QQPlotItemView: React.FC<{ data: any; title: string }> = ({ data, title })
   );
 };
 
+export interface OutlineNode {
+  id: string;
+  label: string;
+  iconType: 'title' | 'log' | 'notes' | 'table' | 'chart';
+}
+
+export function getOutlineNodes(item: OutputItem): OutlineNode[] {
+  const nodes: OutlineNode[] = [
+    { id: `output-${item.id}-title`, label: 'Title', iconType: 'title' },
+  ];
+
+  if (item.syntax) {
+    nodes.push({ id: `output-${item.id}-log`, label: 'Log', iconType: 'log' });
+  }
+
+  nodes.push({ id: `output-${item.id}-notes`, label: 'Notes', iconType: 'notes' });
+
+  const data = item.data || {};
+  switch (item.type) {
+    case 'descriptives':
+      nodes.push({ id: `output-${item.id}-table-descriptives`, label: 'Descriptive Statistics', iconType: 'table' });
+      break;
+
+    case 'frequencies':
+      if (Array.isArray(data.tables)) {
+        if (data.tables.length > 1) {
+          nodes.push({ id: `output-${item.id}-table-stats-summary`, label: 'Statistics', iconType: 'table' });
+        }
+        data.tables.forEach((t: any, idx: number) => {
+          nodes.push({
+            id: `output-${item.id}-table-freq-${idx}`,
+            label: t.variable || `Table ${idx + 1}`,
+            iconType: 'table',
+          });
+        });
+      } else {
+        nodes.push({ id: `output-${item.id}-table-frequencies`, label: 'Frequencies', iconType: 'table' });
+      }
+      break;
+
+    case 'correlations':
+      nodes.push({ id: `output-${item.id}-table-correlations`, label: 'Correlations', iconType: 'table' });
+      break;
+
+    case 'one_sample_t_test':
+      nodes.push({ id: `output-${item.id}-table-stats`, label: 'One-Sample Statistics', iconType: 'table' });
+      nodes.push({ id: `output-${item.id}-table-test`, label: 'One-Sample Test', iconType: 'table' });
+      break;
+
+    case 'independent_t_test':
+      nodes.push({ id: `output-${item.id}-table-group-stats`, label: 'Group Statistics', iconType: 'table' });
+      nodes.push({ id: `output-${item.id}-table-test`, label: 'Independent Samples Test', iconType: 'table' });
+      break;
+
+    case 'paired_t_test':
+      nodes.push({ id: `output-${item.id}-table-paired-stats`, label: 'Paired Samples Statistics', iconType: 'table' });
+      if (Array.isArray(data.paired_correlations) && data.paired_correlations.length > 0) {
+        nodes.push({ id: `output-${item.id}-table-paired-corr`, label: 'Paired Samples Correlations', iconType: 'table' });
+      }
+      nodes.push({ id: `output-${item.id}-table-test`, label: 'Paired Samples Test', iconType: 'table' });
+      break;
+
+    case 'one_way_anova':
+      if (data.descriptives) {
+        nodes.push({ id: `output-${item.id}-table-descriptives`, label: 'Descriptives', iconType: 'table' });
+      }
+      if (data.homogeneity_of_variances) {
+        nodes.push({ id: `output-${item.id}-table-homogeneity`, label: 'Test of Homogeneity of Variances', iconType: 'table' });
+      }
+      nodes.push({ id: `output-${item.id}-table-anova`, label: 'ANOVA', iconType: 'table' });
+      if (Array.isArray(data.post_hoc) && data.post_hoc.length > 0) {
+        nodes.push({ id: `output-${item.id}-table-posthoc`, label: 'Multiple Comparisons', iconType: 'table' });
+      }
+      break;
+
+    case 'linear_regression':
+      nodes.push({ id: `output-${item.id}-table-summary`, label: 'Model Summary', iconType: 'table' });
+      nodes.push({ id: `output-${item.id}-table-anova`, label: 'ANOVA', iconType: 'table' });
+      nodes.push({ id: `output-${item.id}-table-coefficients`, label: 'Coefficients', iconType: 'table' });
+      break;
+
+    case 'crosstabs':
+      nodes.push({ id: `output-${item.id}-table-crosstab`, label: `${data.row_var || 'Row'} * ${data.col_var || 'Col'} Crosstabulation`, iconType: 'table' });
+      if (data.chi_square_tests) {
+        nodes.push({ id: `output-${item.id}-table-chisquare`, label: 'Chi-Square Tests', iconType: 'table' });
+      }
+      break;
+
+    case 'means_report':
+      if (Array.isArray(data.tables)) {
+        data.tables.forEach((t: any, idx: number) => {
+          nodes.push({
+            id: `output-${item.id}-table-means-${idx}`,
+            label: `Report: ${t.dependent_variable || idx + 1}`,
+            iconType: 'table',
+          });
+        });
+      }
+      break;
+
+    case 'reliability':
+      nodes.push({ id: `output-${item.id}-table-case-summary`, label: 'Case Processing Summary', iconType: 'table' });
+      nodes.push({ id: `output-${item.id}-table-reliability`, label: 'Reliability Statistics', iconType: 'table' });
+      if (data.item_statistics) {
+        nodes.push({ id: `output-${item.id}-table-item-stats`, label: 'Item Statistics', iconType: 'table' });
+      }
+      if (data.item_total_statistics) {
+        nodes.push({ id: `output-${item.id}-table-item-total`, label: 'Item-Total Statistics', iconType: 'table' });
+      }
+      break;
+
+    case 'factor_analysis':
+      if (data.kmo_bartlett) {
+        nodes.push({ id: `output-${item.id}-table-kmo`, label: "KMO and Bartlett's Test", iconType: 'table' });
+      }
+      nodes.push({ id: `output-${item.id}-table-variance`, label: 'Total Variance Explained', iconType: 'table' });
+      if (data.component_matrix) {
+        nodes.push({ id: `output-${item.id}-table-component`, label: 'Component Matrix', iconType: 'table' });
+      }
+      break;
+
+    case 'chart':
+    case 'histogram_curve':
+    case 'scatter_regression':
+    case 'boxplot_chart':
+    case 'qqplot_chart':
+    case 'kaplan_meier':
+      nodes.push({ id: `output-${item.id}-chart`, label: item.title, iconType: 'chart' });
+      break;
+
+    default:
+      nodes.push({ id: `output-${item.id}-table-content`, label: item.title || 'Pivot Table', iconType: 'table' });
+      break;
+  }
+
+  return nodes;
+}
+
+export const SPSSPivotTableWrapper: React.FC<{
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+  notes?: string | string[];
+  maxWidth?: number | string;
+}> = ({ id, title, children, notes, maxWidth }) => {
+  const [copied, setCopied] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!wrapperRef.current) return;
+    const tableEl = wrapperRef.current.querySelector('table');
+    if (!tableEl) return;
+    const success = await copyTableElementToClipboard(tableEl);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div id={id} ref={wrapperRef} className="spss-pivot-table-wrapper" style={maxWidth ? { maxWidth } : undefined}>
+      <div className="spss-pivot-title-row">
+        <div className="spss-pivot-title">{title}</div>
+        <button
+          className="spss-copy-table-btn"
+          onClick={handleCopy}
+          title="Copy this table to clipboard (TSV for Excel / Rich HTML for Word)"
+        >
+          {copied ? <Check size={11} color="var(--success)" /> : <Copy size={11} />}
+          <span>{copied ? 'Copied' : 'Copy Table'}</span>
+        </button>
+      </div>
+      {children}
+      {notes && (
+        <div className="spss-pivot-notes">
+          {Array.isArray(notes) ? notes.map((n, i) => <div key={i}>{n}</div>) : notes}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onDeleteOutputItem, onExport }) => {
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [collapsedItems, setCollapsedItems] = useState<Record<string, boolean>>({});
+  const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [collapsedNavBranches, setCollapsedNavBranches] = useState<Record<string, boolean>>({});
+  const [allNavCollapsed, setAllNavCollapsed] = useState<boolean>(false);
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(() => outputs[0]?.id || null);
+  const [selectedNavId, setSelectedNavId] = useState<string | null>(null);
 
-  const scrollToItem = (id: string) => {
-    itemRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Sync selectedOutputId if deleted or outputs change
+  useEffect(() => {
+    if (outputs.length === 0) {
+      setSelectedOutputId(null);
+      setSelectedNavId(null);
+    } else if (!outputs.some((o) => o.id === selectedOutputId)) {
+      setSelectedOutputId(outputs[0].id);
+    }
+  }, [outputs, selectedOutputId]);
+
+  // Global Keyboard Navigation & Deletion in Output Viewer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)) {
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedOutputId && onDeleteOutputItem) {
+          e.preventDefault();
+          handleDelete(selectedOutputId);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        navigateSelection(1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        navigateSelection(-1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedOutputId, outputs, onDeleteOutputItem]);
+
+  const navigateSelection = (direction: number) => {
+    if (outputs.length === 0) return;
+    const currentIdx = outputs.findIndex((o) => o.id === selectedOutputId);
+    let nextIdx = currentIdx + direction;
+    if (nextIdx < 0) nextIdx = 0;
+    if (nextIdx >= outputs.length) nextIdx = outputs.length - 1;
+    const nextItem = outputs[nextIdx];
+    if (nextItem) {
+      setSelectedOutputId(nextItem.id);
+      setSelectedNavId(null);
+      itemRefs.current[nextItem.id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   };
 
-  const toggleCollapse = (id: string) => {
-    setCollapsedItems((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handleDelete = (id: string) => {
+    const currentIdx = outputs.findIndex((o) => o.id === id);
+    const nextItem = outputs[currentIdx + 1] || outputs[currentIdx - 1] || null;
+    setSelectedOutputId(nextItem ? nextItem.id : null);
+    setSelectedNavId(null);
+    if (onDeleteOutputItem) {
+      onDeleteOutputItem(id);
+    }
   };
 
-  const handleCopyTable = (itemId: string) => {
+  const handleSelectNode = (itemId: string, targetId: string) => {
+    setSelectedOutputId(itemId);
+    setSelectedNavId(targetId);
+    const el = document.getElementById(targetId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el.classList.add('spss-target-highlight');
+      setTimeout(() => el.classList.remove('spss-target-highlight'), 1600);
+    } else {
+      itemRefs.current[itemId]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const toggleNavBranch = (id: string) => {
+    setCollapsedNavBranches((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleCollapseCard = (id: string) => {
+    setCollapsedCards((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleCopyCard = async (itemId: string) => {
     const cardEl = itemRefs.current[itemId];
     if (!cardEl) return;
-    const tableEl = cardEl.querySelector('table');
-    if (!tableEl) return;
-
-    const rows = Array.from(tableEl.querySelectorAll('tr'));
-    const tsv = rows
-      .map((row) => {
-        const cells = Array.from(row.querySelectorAll('th, td'));
-        return cells.map((cell) => cell.textContent?.trim() || '').join('\t');
-      })
-      .join('\r\n');
-
-    navigator.clipboard.writeText(tsv);
-    setCopiedId(itemId);
-    setTimeout(() => setCopiedId(null), 2000);
+    const firstTable = cardEl.querySelector('table');
+    if (!firstTable) return;
+    const success = await copyTableElementToClipboard(firstTable);
+    if (success) {
+      setCopiedId(itemId);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
   };
 
   // Helper to render SPSS Pivot Tables
@@ -1424,8 +1679,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 1. DESCRIPTIVES PIVOT TABLE
     if (type === 'descriptives') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Descriptive Statistics</div>
+        <SPSSPivotTableWrapper id={`output-${item.id}-table-descriptives`} title="Descriptive Statistics">
           <table className="spss-pivot-table">
             <thead>
               <tr>
@@ -1464,7 +1718,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               </tr>
             </tbody>
           </table>
-        </div>
+        </SPSSPivotTableWrapper>
       );
     }
 
@@ -1472,9 +1726,38 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     if (type === 'frequencies') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {data.tables && data.tables.length > 1 && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-stats-summary`} title="Statistics">
+              <table className="spss-pivot-table" style={{ maxWidth: 500 }}>
+                <thead>
+                  <tr>
+                    <th className="align-left" colSpan={2}></th>
+                    {data.tables.map((t: any, idx: number) => (
+                      <th key={idx}>{t.variable}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>N</td>
+                    <td className="align-left">Valid</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.total_valid}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left">Missing</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.total_missing}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+
           {data.tables?.map((table: any, tIdx: number) => (
-            <div key={tIdx} className="spss-pivot-table-wrapper">
-              <div className="spss-pivot-title">{table.variable}</div>
+            <SPSSPivotTableWrapper key={tIdx} id={`output-${item.id}-table-freq-${tIdx}`} title={table.variable}>
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -1545,7 +1828,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   )}
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           ))}
         </div>
       );
@@ -1554,101 +1837,103 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 3. CROSSTABS PIVOT TABLE
     if (type === 'crosstabs') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">{data.row_var} * {data.col_var} Crosstabulation</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left" colSpan={2} rowSpan={2}>{data.row_var}</th>
-                <th className="align-center" colSpan={data.col_categories?.length || 1}>{data.col_var}</th>
-                <th rowSpan={2}>Total</th>
-              </tr>
-              <tr>
-                {data.col_categories?.map((col: string) => (
-                  <th key={col} className="align-center">{col}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.row_categories?.map((rowCat: string, rIdx: number) => (
-                <React.Fragment key={rIdx}>
-                  <tr>
-                    <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                      {rowCat}
-                    </td>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
-                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                      <td key={cIdx}>{cell.count}</td>
-                    ))}
-                    <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
-                  </tr>
-                  <tr>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
-                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                      <td key={cIdx}>{cell.expected}</td>
-                    ))}
-                    <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
-                  </tr>
-                  <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
-                    {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                      <td key={cIdx}>{cell.row_percent}%</td>
-                    ))}
-                    <td style={{ fontWeight: 600 }}>100.0%</td>
-                  </tr>
-                </React.Fragment>
-              ))}
-              <tr className="spss-pivot-total-row">
-                <td className="align-left" rowSpan={3} style={{ fontWeight: 700, verticalAlign: 'top' }}>Total</td>
-                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
-                {data.col_totals?.map((colTot: number, cIdx: number) => (
-                  <td key={cIdx}>{colTot}</td>
-                ))}
-                <td>{data.grand_total}</td>
-              </tr>
-              <tr>
-                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
-                {data.col_totals?.map((colTot: number, cIdx: number) => (
-                  <td key={cIdx}>{colTot}</td>
-                ))}
-                <td>{data.grand_total}</td>
-              </tr>
-              <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
-                <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
-                {data.col_totals?.map((colTot: number, cIdx: number) => (
-                  <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
-                ))}
-                <td>100.0%</td>
-              </tr>
-            </tbody>
-          </table>
-
-          {/* Chi-Square Tests Table */}
-          <div style={{ marginTop: 16 }}>
-            <div className="spss-pivot-title">Chi-Square Tests</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-crosstab`} title={`${data.row_var} * ${data.col_var} Crosstabulation`}>
             <table className="spss-pivot-table">
               <thead>
                 <tr>
-                  <th className="align-left">Test</th>
-                  <th>Value</th>
-                  <th>df</th>
-                  <th>Asymptotic Sig. (2-sided)</th>
+                  <th className="align-left" colSpan={2} rowSpan={2}>{data.row_var}</th>
+                  <th className="align-center" colSpan={data.col_categories?.length || 1}>{data.col_var}</th>
+                  <th rowSpan={2}>Total</th>
+                </tr>
+                <tr>
+                  {data.col_categories?.map((col: string) => (
+                    <th key={col} className="align-center">{col}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {data.chi_square_tests?.map((t: any, i: number) => (
-                  <tr key={i}>
-                    <td className="align-left">{t.test}</td>
-                    <td>{t.value}</td>
-                    <td>{t.df ?? '-'}</td>
-                    <td style={{ fontWeight: t.asymp_sig_2_sided < 0.05 ? 700 : 400, color: t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                      {t.asymp_sig_2_sided ?? '-'}
-                    </td>
-                  </tr>
+                {data.row_categories?.map((rowCat: string, rIdx: number) => (
+                  <React.Fragment key={rIdx}>
+                    <tr>
+                      <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                        {rowCat}
+                      </td>
+                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
+                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                        <td key={cIdx}>{cell.count}</td>
+                      ))}
+                      <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                    </tr>
+                    <tr>
+                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                        <td key={cIdx}>{cell.expected}</td>
+                      ))}
+                      <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                        <td key={cIdx}>{cell.row_percent}%</td>
+                      ))}
+                      <td style={{ fontWeight: 600 }}>100.0%</td>
+                    </tr>
+                  </React.Fragment>
                 ))}
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left" rowSpan={3} style={{ fontWeight: 700, verticalAlign: 'top' }}>Total</td>
+                  <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
+                  {data.col_totals?.map((colTot: number, cIdx: number) => (
+                    <td key={cIdx}>{colTot}</td>
+                  ))}
+                  <td>{data.grand_total}</td>
+                </tr>
+                <tr>
+                  <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                  {data.col_totals?.map((colTot: number, cIdx: number) => (
+                    <td key={cIdx}>{colTot}</td>
+                  ))}
+                  <td>{data.grand_total}</td>
+                </tr>
+                <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
+                  <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                  {data.col_totals?.map((colTot: number, cIdx: number) => (
+                    <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                  ))}
+                  <td>100.0%</td>
+                </tr>
               </tbody>
             </table>
-          </div>
+          </SPSSPivotTableWrapper>
+
+          {/* Chi-Square Tests Table */}
+          {data.chi_square_tests && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-chisquare`} title="Chi-Square Tests">
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left">Test</th>
+                    <th>Value</th>
+                    <th>df</th>
+                    <th>Asymptotic Sig. (2-sided)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.chi_square_tests?.map((t: any, i: number) => (
+                    <tr key={i}>
+                      <td className="align-left">{t.test}</td>
+                      <td>{t.value}</td>
+                      <td>{t.df ?? '-'}</td>
+                      <td style={{ fontWeight: t.asymp_sig_2_sided < 0.05 ? 700 : 400, color: t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                        {t.asymp_sig_2_sided ?? '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
         </div>
       );
     }
@@ -1656,8 +1941,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 4. CORRELATIONS PIVOT TABLE
     if (type === 'correlations') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Correlations</div>
+        <SPSSPivotTableWrapper id={`output-${item.id}-table-correlations`} title="Correlations" notes={data.notes}>
           <table className="spss-pivot-table">
             <thead>
               <tr>
@@ -1705,81 +1989,78 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               ))}
             </tbody>
           </table>
-          <div className="spss-pivot-notes">
-            {data.notes?.map((n: string, i: number) => (
-              <div key={i}>{n}</div>
-            ))}
-          </div>
-        </div>
+        </SPSSPivotTableWrapper>
       );
     }
 
     // 5. ONE-SAMPLE T-TEST
     if (type === 'one_sample_t_test') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">One-Sample Statistics</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left">Variable</th>
-                <th>N</th>
-                <th>Mean</th>
-                <th>Std. Deviation</th>
-                <th>Std. Error Mean</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.descriptives?.map((d: any, i: number) => (
-                <tr key={i}>
-                  <td className="align-left">{d.variable}</td>
-                  <td>{d.n ?? '.'}</td>
-                  <td>{d.mean !== null && d.mean !== undefined ? d.mean : '.'}</td>
-                  <td>{d.std_dev !== null && d.std_dev !== undefined ? d.std_dev : '.'}</td>
-                  <td>{d.se_mean !== null && d.se_mean !== undefined ? d.se_mean : '.'}</td>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-stats`} title="One-Sample Statistics">
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  <th>N</th>
+                  <th>Mean</th>
+                  <th>Std. Deviation</th>
+                  <th>Std. Error Mean</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.descriptives?.map((d: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left">{d.variable}</td>
+                    <td>{d.n ?? '.'}</td>
+                    <td>{d.mean !== null && d.mean !== undefined ? d.mean : '.'}</td>
+                    <td>{d.std_dev !== null && d.std_dev !== undefined ? d.std_dev : '.'}</td>
+                    <td>{d.se_mean !== null && d.se_mean !== undefined ? d.se_mean : '.'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
 
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>One-Sample Test</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left" rowSpan={3}>Variable</th>
-                <th colSpan={6} className="align-center">Test Value = {data.test_value}</th>
-              </tr>
-              <tr>
-                <th rowSpan={2}>t</th>
-                <th rowSpan={2}>df</th>
-                <th rowSpan={2}>Sig. (2-tailed)</th>
-                <th rowSpan={2}>Mean Difference</th>
-                <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
-              </tr>
-              <tr>
-                <th>Lower</th>
-                <th>Upper</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.test_results?.map((t: any, i: number) => (
-                <tr key={i}>
-                  <td className="align-left">{t.variable}</td>
-                  <td>{t.t !== null && t.t !== undefined ? t.t : '.'}</td>
-                  <td>{t.df !== null && t.df !== undefined ? t.df : '.'}</td>
-                  <td style={{
-                    fontWeight: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 700 : 400,
-                    color: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
-                  }}>
-                    {t.sig_2_tailed !== null && t.sig_2_tailed !== undefined ? (t.sig_2_tailed === 0 ? '.000' : t.sig_2_tailed) : '.'}
-                  </td>
-                  <td>{t.mean_difference !== null && t.mean_difference !== undefined ? t.mean_difference : '.'}</td>
-                  <td>{t.ci_lower !== null && t.ci_lower !== undefined ? t.ci_lower : '.'}</td>
-                  <td>{t.ci_upper !== null && t.ci_upper !== undefined ? t.ci_upper : '.'}</td>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-test`} title={`One-Sample Test (Test Value = ${data.test_value})`}>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left" rowSpan={3}>Variable</th>
+                  <th colSpan={6} className="align-center">Test Value = {data.test_value}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+                <tr>
+                  <th rowSpan={2}>t</th>
+                  <th rowSpan={2}>df</th>
+                  <th rowSpan={2}>Sig. (2-tailed)</th>
+                  <th rowSpan={2}>Mean Difference</th>
+                  <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
+                </tr>
+                <tr>
+                  <th>Lower</th>
+                  <th>Upper</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.test_results?.map((t: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left">{t.variable}</td>
+                    <td>{t.t !== null && t.t !== undefined ? t.t : '.'}</td>
+                    <td>{t.df !== null && t.df !== undefined ? t.df : '.'}</td>
+                    <td style={{
+                      fontWeight: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 700 : 400,
+                      color: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                    }}>
+                      {t.sig_2_tailed !== null && t.sig_2_tailed !== undefined ? (t.sig_2_tailed === 0 ? '.000' : t.sig_2_tailed) : '.'}
+                    </td>
+                    <td>{t.mean_difference !== null && t.mean_difference !== undefined ? t.mean_difference : '.'}</td>
+                    <td>{t.ci_lower !== null && t.ci_lower !== undefined ? t.ci_lower : '.'}</td>
+                    <td>{t.ci_upper !== null && t.ci_upper !== undefined ? t.ci_upper : '.'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
         </div>
       );
     }
@@ -1787,102 +2068,104 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 6. INDEPENDENT SAMPLES T-TEST
     if (type === 'independent_t_test') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Group Statistics</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left">Variable</th>
-                <th className="align-left">{data.group_variable}</th>
-                <th>N</th>
-                <th>Mean</th>
-                <th>Std. Deviation</th>
-                <th>Std. Error Mean</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.group_statistics?.map((g: any, i: number) => (
-                <tr key={i}>
-                  <td className="align-left">{g.variable}</td>
-                  <td className="align-left">{g.group}</td>
-                  <td>{g.n ?? '.'}</td>
-                  <td>{g.mean !== null && g.mean !== undefined ? g.mean : '.'}</td>
-                  <td>{g.std_dev !== null && g.std_dev !== undefined ? g.std_dev : '.'}</td>
-                  <td>{g.se_mean !== null && g.se_mean !== undefined ? g.se_mean : '.'}</td>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-group-stats`} title="Group Statistics">
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Variable</th>
+                  <th className="align-left">{data.group_variable}</th>
+                  <th>N</th>
+                  <th>Mean</th>
+                  <th>Std. Deviation</th>
+                  <th>Std. Error Mean</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.group_statistics?.map((g: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left">{g.variable}</td>
+                    <td className="align-left">{g.group}</td>
+                    <td>{g.n ?? '.'}</td>
+                    <td>{g.mean !== null && g.mean !== undefined ? g.mean : '.'}</td>
+                    <td>{g.std_dev !== null && g.std_dev !== undefined ? g.std_dev : '.'}</td>
+                    <td>{g.se_mean !== null && g.se_mean !== undefined ? g.se_mean : '.'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
 
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>Independent Samples Test</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left" rowSpan={3} colSpan={2}></th>
-                <th colSpan={2} className="align-center">Levene's Test for Equality of Variances</th>
-                <th colSpan={7} className="align-center">t-test for Equality of Means</th>
-              </tr>
-              <tr>
-                <th rowSpan={2}>F</th>
-                <th rowSpan={2}>Sig.</th>
-                <th rowSpan={2}>t</th>
-                <th rowSpan={2}>df</th>
-                <th rowSpan={2}>Sig. (2-tailed)</th>
-                <th rowSpan={2}>Mean Difference</th>
-                <th rowSpan={2}>Std. Error Difference</th>
-                <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
-              </tr>
-              <tr>
-                <th>Lower</th>
-                <th>Upper</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.test_results?.map((t: any, i: number) => (
-                <React.Fragment key={i}>
-                  <tr>
-                    <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>{t.variable}</td>
-                    <td className="align-left" style={{ fontWeight: 500 }}>Equal variances assumed</td>
-                    <td>{t.levene_f !== null && t.levene_f !== undefined ? t.levene_f : '.'}</td>
-                    <td>{t.levene_sig !== null && t.levene_sig !== undefined ? (t.levene_sig === 0 ? '.000' : t.levene_sig) : '.'}</td>
-                    <td>{t.equal_var_assumed?.t !== null && t.equal_var_assumed?.t !== undefined ? t.equal_var_assumed.t : '.'}</td>
-                    <td>{t.equal_var_assumed?.df !== null && t.equal_var_assumed?.df !== undefined ? t.equal_var_assumed.df : '.'}</td>
-                    <td style={{
-                      fontWeight: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
-                      color: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
-                    }}>
-                      {t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed !== undefined
-                        ? (t.equal_var_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_assumed.sig_2_tailed)
-                        : '.'}
-                    </td>
-                    <td>{t.equal_var_assumed?.mean_diff !== null && t.equal_var_assumed?.mean_diff !== undefined ? t.equal_var_assumed.mean_diff : '.'}</td>
-                    <td>{t.equal_var_assumed?.se_diff !== null && t.equal_var_assumed?.se_diff !== undefined ? t.equal_var_assumed.se_diff : '.'}</td>
-                    <td>{t.equal_var_assumed?.ci_lower !== null && t.equal_var_assumed?.ci_lower !== undefined ? t.equal_var_assumed.ci_lower : '.'}</td>
-                    <td>{t.equal_var_assumed?.ci_upper !== null && t.equal_var_assumed?.ci_upper !== undefined ? t.equal_var_assumed.ci_upper : '.'}</td>
-                  </tr>
-                  <tr>
-                    <td className="align-left" style={{ color: 'var(--text-muted)' }}>Equal variances not assumed</td>
-                    <td>.</td>
-                    <td>.</td>
-                    <td>{t.equal_var_not_assumed?.t !== null && t.equal_var_not_assumed?.t !== undefined ? t.equal_var_not_assumed.t : '.'}</td>
-                    <td>{t.equal_var_not_assumed?.df !== null && t.equal_var_not_assumed?.df !== undefined ? t.equal_var_not_assumed.df : '.'}</td>
-                    <td style={{
-                      fontWeight: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
-                      color: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
-                    }}>
-                      {t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed !== undefined
-                        ? (t.equal_var_not_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_not_assumed.sig_2_tailed)
-                        : '.'}
-                    </td>
-                    <td>{t.equal_var_not_assumed?.mean_diff !== null && t.equal_var_not_assumed?.mean_diff !== undefined ? t.equal_var_not_assumed.mean_diff : '.'}</td>
-                    <td>{t.equal_var_not_assumed?.se_diff !== null && t.equal_var_not_assumed?.se_diff !== undefined ? t.equal_var_not_assumed.se_diff : '.'}</td>
-                    <td>{t.equal_var_not_assumed?.ci_lower !== null && t.equal_var_not_assumed?.ci_lower !== undefined ? t.equal_var_not_assumed.ci_lower : '.'}</td>
-                    <td>{t.equal_var_not_assumed?.ci_upper !== null && t.equal_var_not_assumed?.ci_upper !== undefined ? t.equal_var_not_assumed.ci_upper : '.'}</td>
-                  </tr>
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-test`} title="Independent Samples Test">
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left" rowSpan={3} colSpan={2}></th>
+                  <th colSpan={2} className="align-center">Levene's Test for Equality of Variances</th>
+                  <th colSpan={7} className="align-center">t-test for Equality of Means</th>
+                </tr>
+                <tr>
+                  <th rowSpan={2}>F</th>
+                  <th rowSpan={2}>Sig.</th>
+                  <th rowSpan={2}>t</th>
+                  <th rowSpan={2}>df</th>
+                  <th rowSpan={2}>Sig. (2-tailed)</th>
+                  <th rowSpan={2}>Mean Difference</th>
+                  <th rowSpan={2}>Std. Error Difference</th>
+                  <th colSpan={2} className="align-center">95% Confidence Interval of the Difference</th>
+                </tr>
+                <tr>
+                  <th>Lower</th>
+                  <th>Upper</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.test_results?.map((t: any, i: number) => (
+                  <React.Fragment key={i}>
+                    <tr>
+                      <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>{t.variable}</td>
+                      <td className="align-left" style={{ fontWeight: 500 }}>Equal variances assumed</td>
+                      <td>{t.levene_f !== null && t.levene_f !== undefined ? t.levene_f : '.'}</td>
+                      <td>{t.levene_sig !== null && t.levene_sig !== undefined ? (t.levene_sig === 0 ? '.000' : t.levene_sig) : '.'}</td>
+                      <td>{t.equal_var_assumed?.t !== null && t.equal_var_assumed?.t !== undefined ? t.equal_var_assumed.t : '.'}</td>
+                      <td>{t.equal_var_assumed?.df !== null && t.equal_var_assumed?.df !== undefined ? t.equal_var_assumed.df : '.'}</td>
+                      <td style={{
+                        fontWeight: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
+                        color: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                      }}>
+                        {t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed !== undefined
+                          ? (t.equal_var_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_assumed.sig_2_tailed)
+                          : '.'}
+                      </td>
+                      <td>{t.equal_var_assumed?.mean_diff !== null && t.equal_var_assumed?.mean_diff !== undefined ? t.equal_var_assumed.mean_diff : '.'}</td>
+                      <td>{t.equal_var_assumed?.se_diff !== null && t.equal_var_assumed?.se_diff !== undefined ? t.equal_var_assumed.se_diff : '.'}</td>
+                      <td>{t.equal_var_assumed?.ci_lower !== null && t.equal_var_assumed?.ci_lower !== undefined ? t.equal_var_assumed.ci_lower : '.'}</td>
+                      <td>{t.equal_var_assumed?.ci_upper !== null && t.equal_var_assumed?.ci_upper !== undefined ? t.equal_var_assumed.ci_upper : '.'}</td>
+                    </tr>
+                    <tr>
+                      <td className="align-left" style={{ color: 'var(--text-muted)' }}>Equal variances not assumed</td>
+                      <td>.</td>
+                      <td>.</td>
+                      <td>{t.equal_var_not_assumed?.t !== null && t.equal_var_not_assumed?.t !== undefined ? t.equal_var_not_assumed.t : '.'}</td>
+                      <td>{t.equal_var_not_assumed?.df !== null && t.equal_var_not_assumed?.df !== undefined ? t.equal_var_not_assumed.df : '.'}</td>
+                      <td style={{
+                        fontWeight: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
+                        color: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
+                      }}>
+                        {t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed !== undefined
+                          ? (t.equal_var_not_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_not_assumed.sig_2_tailed)
+                          : '.'}
+                      </td>
+                      <td>{t.equal_var_not_assumed?.mean_diff !== null && t.equal_var_not_assumed?.mean_diff !== undefined ? t.equal_var_not_assumed.mean_diff : '.'}</td>
+                      <td>{t.equal_var_not_assumed?.se_diff !== null && t.equal_var_not_assumed?.se_diff !== undefined ? t.equal_var_not_assumed.se_diff : '.'}</td>
+                      <td>{t.equal_var_not_assumed?.ci_lower !== null && t.equal_var_not_assumed?.ci_lower !== undefined ? t.equal_var_not_assumed.ci_lower : '.'}</td>
+                      <td>{t.equal_var_not_assumed?.ci_upper !== null && t.equal_var_not_assumed?.ci_upper !== undefined ? t.equal_var_not_assumed.ci_upper : '.'}</td>
+                    </tr>
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
         </div>
       );
     }
@@ -1890,10 +2173,9 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 6.5. PAIRED SAMPLES T-TEST
     if (type === 'paired_t_test') {
       return (
-        <div className="spss-pivot-table-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* 1. Paired Samples Statistics */}
-          <div>
-            <div className="spss-pivot-title">Paired Samples Statistics</div>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-paired-stats`} title="Paired Samples Statistics">
             <table className="spss-pivot-table">
               <thead>
                 <tr>
@@ -1922,12 +2204,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 ))}
               </tbody>
             </table>
-          </div>
+          </SPSSPivotTableWrapper>
 
           {/* 2. Paired Samples Correlations */}
           {data.paired_correlations?.length > 0 && (
-            <div>
-              <div className="spss-pivot-title">Paired Samples Correlations</div>
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-paired-corr`} title="Paired Samples Correlations">
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -1953,12 +2234,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   ))}
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           )}
 
           {/* 3. Paired Samples Test */}
-          <div>
-            <div className="spss-pivot-title">Paired Samples Test</div>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-test`} title="Paired Samples Test">
             <table className="spss-pivot-table">
               <thead>
                 <tr>
@@ -2000,7 +2280,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 ))}
               </tbody>
             </table>
-          </div>
+          </SPSSPivotTableWrapper>
         </div>
       );
     }
@@ -2008,43 +2288,45 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 7. ONE-WAY ANOVA
     if (type === 'one_way_anova') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Descriptives ({data.dependent_variable})</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left">{data.factor_variable}</th>
-                <th>N</th>
-                <th>Mean</th>
-                <th>Std. Deviation</th>
-                <th>Std. Error</th>
-                <th>95% CI Lower</th>
-                <th>95% CI Upper</th>
-                <th>Min</th>
-                <th>Max</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.descriptives?.map((d: any, i: number) => (
-                <tr key={i} className={d.group === 'Total' ? 'spss-pivot-total-row' : ''}>
-                  <td className="align-left">{d.group}</td>
-                  <td>{d.n}</td>
-                  <td>{d.mean}</td>
-                  <td>{d.std_dev}</td>
-                  <td>{d.se_mean}</td>
-                  <td>{d.ci_lower ?? '-'}</td>
-                  <td>{d.ci_upper ?? '-'}</td>
-                  <td>{d.min}</td>
-                  <td>{d.max}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {data.descriptives && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-descriptives`} title={`Descriptives (${data.dependent_variable})`}>
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left">{data.factor_variable}</th>
+                    <th>N</th>
+                    <th>Mean</th>
+                    <th>Std. Deviation</th>
+                    <th>Std. Error</th>
+                    <th>95% CI Lower</th>
+                    <th>95% CI Upper</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.descriptives?.map((d: any, i: number) => (
+                    <tr key={i} className={d.group === 'Total' ? 'spss-pivot-total-row' : ''}>
+                      <td className="align-left">{d.group}</td>
+                      <td>{d.n}</td>
+                      <td>{d.mean}</td>
+                      <td>{d.std_dev}</td>
+                      <td>{d.se_mean}</td>
+                      <td>{d.ci_lower ?? '-'}</td>
+                      <td>{d.ci_upper ?? '-'}</td>
+                      <td>{d.min}</td>
+                      <td>{d.max}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
 
           {/* Test of Homogeneity of Variances */}
           {data.homogeneity_of_variances && (
-            <div style={{ marginTop: 16 }}>
-              <div className="spss-pivot-title">Test of Homogeneity of Variances ({data.dependent_variable})</div>
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-homogeneity`} title={`Test of Homogeneity of Variances (${data.dependent_variable})`}>
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -2065,54 +2347,54 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   </tr>
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           )}
 
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>ANOVA ({data.dependent_variable})</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left">Source of Variation</th>
-                <th>Sum of Squares</th>
-                <th>df</th>
-                <th>Mean Square</th>
-                <th>F</th>
-                <th>Sig.</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="align-left">Between Groups</td>
-                <td>{data.anova_table?.between_groups?.sum_of_squares}</td>
-                <td>{data.anova_table?.between_groups?.df}</td>
-                <td>{data.anova_table?.between_groups?.mean_square}</td>
-                <td style={{ fontWeight: 700 }}>{data.anova_table?.between_groups?.f}</td>
-                <td style={{ fontWeight: 700, color: data.anova_table?.between_groups?.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                  {data.anova_table?.between_groups?.sig}
-                </td>
-              </tr>
-              <tr>
-                <td className="align-left">Within Groups</td>
-                <td>{data.anova_table?.within_groups?.sum_of_squares}</td>
-                <td>{data.anova_table?.within_groups?.df}</td>
-                <td>{data.anova_table?.within_groups?.mean_square}</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-              <tr className="spss-pivot-total-row">
-                <td className="align-left">Total</td>
-                <td>{data.anova_table?.total?.sum_of_squares}</td>
-                <td>{data.anova_table?.total?.df}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-            </tbody>
-          </table>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-anova`} title={`ANOVA (${data.dependent_variable})`}>
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Source of Variation</th>
+                  <th>Sum of Squares</th>
+                  <th>df</th>
+                  <th>Mean Square</th>
+                  <th>F</th>
+                  <th>Sig.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left">Between Groups</td>
+                  <td>{data.anova_table?.between_groups?.sum_of_squares}</td>
+                  <td>{data.anova_table?.between_groups?.df}</td>
+                  <td>{data.anova_table?.between_groups?.mean_square}</td>
+                  <td style={{ fontWeight: 700 }}>{data.anova_table?.between_groups?.f}</td>
+                  <td style={{ fontWeight: 700, color: data.anova_table?.between_groups?.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
+                    {data.anova_table?.between_groups?.sig}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="align-left">Within Groups</td>
+                  <td>{data.anova_table?.within_groups?.sum_of_squares}</td>
+                  <td>{data.anova_table?.within_groups?.df}</td>
+                  <td>{data.anova_table?.within_groups?.mean_square}</td>
+                  <td>-</td>
+                  <td>-</td>
+                </tr>
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left">Total</td>
+                  <td>{data.anova_table?.total?.sum_of_squares}</td>
+                  <td>{data.anova_table?.total?.df}</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>-</td>
+                </tr>
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
 
           {data.post_hoc?.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <div className="spss-pivot-title">Multiple Comparisons: Tukey HSD ({data.dependent_variable})</div>
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-posthoc`} title={`Multiple Comparisons: Tukey HSD (${data.dependent_variable})`}>
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -2141,7 +2423,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   ))}
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           )}
         </div>
       );
@@ -2150,113 +2432,119 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 8. LINEAR REGRESSION
     if (type === 'linear_regression') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Model Summary</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th>R</th>
-                <th>R Square</th>
-                <th>Adjusted R Square</th>
-                <th>Std. Error of the Estimate</th>
-                {data.model_summary?.durbin_watson !== undefined && <th>Durbin-Watson</th>}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>1</td>
-                <td>{data.model_summary?.r}</td>
-                <td style={{ fontWeight: 700 }}>{data.model_summary?.r_squared}</td>
-                <td>{data.model_summary?.adjusted_r_squared}</td>
-                <td>{data.model_summary?.std_error_estimate}</td>
-                {data.model_summary?.durbin_watson !== undefined && (
-                  <td style={{ fontWeight: 600 }}>{data.model_summary?.durbin_watson}</td>
-                )}
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>ANOVA</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left">Model</th>
-                <th>Sum of Squares</th>
-                <th>df</th>
-                <th>Mean Square</th>
-                <th>F</th>
-                <th>Sig.</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="align-left">Regression</td>
-                <td>{data.anova?.regression?.sum_of_squares}</td>
-                <td>{data.anova?.regression?.df}</td>
-                <td>{data.anova?.regression?.mean_square}</td>
-                <td style={{ fontWeight: 700 }}>{data.anova?.regression?.f}</td>
-                <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.anova?.regression?.sig}</td>
-              </tr>
-              <tr>
-                <td className="align-left">Residual</td>
-                <td>{data.anova?.residual?.sum_of_squares}</td>
-                <td>{data.anova?.residual?.df}</td>
-                <td>{data.anova?.residual?.mean_square}</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-              <tr className="spss-pivot-total-row">
-                <td className="align-left">Total</td>
-                <td>{data.anova?.total?.sum_of_squares}</td>
-                <td>{data.anova?.total?.df}</td>
-                <td>-</td>
-                <td>-</td>
-                <td>-</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="spss-pivot-title" style={{ marginTop: 16 }}>Coefficients</div>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left" rowSpan={2}>Model</th>
-                <th colSpan={2} className="align-center">Unstandardized Coefficients</th>
-                <th className="align-center">Standardized</th>
-                <th rowSpan={2}>t</th>
-                <th rowSpan={2}>Sig.</th>
-                <th colSpan={2} className="align-center">95.0% Confidence Interval for B</th>
-                <th colSpan={2} className="align-center">Collinearity Statistics</th>
-              </tr>
-              <tr>
-                <th>B</th>
-                <th>Std. Error</th>
-                <th>Beta</th>
-                <th>Lower Bound</th>
-                <th>Upper Bound</th>
-                <th>Tolerance</th>
-                <th>VIF</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.coefficients?.map((c: any, i: number) => (
-                <tr key={i}>
-                  <td className="align-left" style={{ fontWeight: 600 }}>{c.term}</td>
-                  <td>{c.b}</td>
-                  <td>{c.se}</td>
-                  <td>{c.beta ?? '-'}</td>
-                  <td>{c.t}</td>
-                  <td style={{ fontWeight: c.sig < 0.05 ? 700 : 400 }}>{c.sig}</td>
-                  <td>{c.ci_lower ?? '-'}</td>
-                  <td>{c.ci_upper ?? '-'}</td>
-                  <td>{c.tolerance ?? '-'}</td>
-                  <td>{c.vif ?? '-'}</td>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-summary`} title="Model Summary">
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>R</th>
+                  <th>R Square</th>
+                  <th>Adjusted R Square</th>
+                  <th>Std. Error of the Estimate</th>
+                  {data.model_summary?.durbin_watson !== undefined && <th>Durbin-Watson</th>}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="spss-pivot-notes">a. Dependent Variable: {data.dependent_variable}</div>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td>{data.model_summary?.r}</td>
+                  <td style={{ fontWeight: 700 }}>{data.model_summary?.r_squared}</td>
+                  <td>{data.model_summary?.adjusted_r_squared}</td>
+                  <td>{data.model_summary?.std_error_estimate}</td>
+                  {data.model_summary?.durbin_watson !== undefined && (
+                    <td style={{ fontWeight: 600 }}>{data.model_summary?.durbin_watson}</td>
+                  )}
+                </tr>
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
+
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-anova`} title="ANOVA">
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left">Model</th>
+                  <th>Sum of Squares</th>
+                  <th>df</th>
+                  <th>Mean Square</th>
+                  <th>F</th>
+                  <th>Sig.</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left">Regression</td>
+                  <td>{data.anova?.regression?.sum_of_squares}</td>
+                  <td>{data.anova?.regression?.df}</td>
+                  <td>{data.anova?.regression?.mean_square}</td>
+                  <td style={{ fontWeight: 700 }}>{data.anova?.regression?.f}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.anova?.regression?.sig}</td>
+                </tr>
+                <tr>
+                  <td className="align-left">Residual</td>
+                  <td>{data.anova?.residual?.sum_of_squares}</td>
+                  <td>{data.anova?.residual?.df}</td>
+                  <td>{data.anova?.residual?.mean_square}</td>
+                  <td>-</td>
+                  <td>-</td>
+                </tr>
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left">Total</td>
+                  <td>{data.anova?.total?.sum_of_squares}</td>
+                  <td>{data.anova?.total?.df}</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>-</td>
+                </tr>
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
+
+          <SPSSPivotTableWrapper
+            id={`output-${item.id}-table-coefficients`}
+            title="Coefficients"
+            notes={`a. Dependent Variable: ${data.dependent_variable}`}
+          >
+            <table className="spss-pivot-table">
+              <thead>
+                <tr>
+                  <th className="align-left" rowSpan={2}>Model</th>
+                  <th colSpan={2} className="align-center">Unstandardized Coefficients</th>
+                  <th className="align-center">Standardized</th>
+                  <th rowSpan={2}>t</th>
+                  <th rowSpan={2}>Sig.</th>
+                  <th colSpan={2} className="align-center">95.0% Confidence Interval for B</th>
+                  <th colSpan={2} className="align-center">Collinearity Statistics</th>
+                </tr>
+                <tr>
+                  <th>B</th>
+                  <th>Std. Error</th>
+                  <th>Beta</th>
+                  <th>Lower Bound</th>
+                  <th>Upper Bound</th>
+                  <th>Tolerance</th>
+                  <th>VIF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.coefficients?.map((c: any, i: number) => (
+                  <tr key={i}>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{c.term}</td>
+                    <td>{c.b}</td>
+                    <td>{c.se}</td>
+                    <td>{c.beta ?? '-'}</td>
+                    <td>{c.t}</td>
+                    <td style={{ fontWeight: c.sig < 0.05 ? 700 : 400 }}>{c.sig}</td>
+                    <td>{c.ci_lower ?? '-'}</td>
+                    <td>{c.ci_upper ?? '-'}</td>
+                    <td>{c.tolerance ?? '-'}</td>
+                    <td>{c.vif ?? '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
         </div>
       );
     }
@@ -3792,38 +4080,99 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       {/* Left Pane: Hierarchical Navigation Tree */}
       <div className="spss-output-tree-pane">
         <div className="spss-output-tree-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Layers size={14} /> Output Outline
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Layers size={14} color="var(--accent)" />
+              <span style={{ fontWeight: 700 }}>Output Outline</span>
+            </div>
+            {outputs.length > 0 && (
+              <button
+                className="spss-btn"
+                style={{ padding: '1px 6px', fontSize: 10, height: 20 }}
+                onClick={() => setAllNavCollapsed(!allNavCollapsed)}
+                title={allNavCollapsed ? 'Expand All' : 'Collapse All'}
+              >
+                {allNavCollapsed ? 'Expand All' : 'Collapse All'}
+              </button>
+            )}
           </div>
         </div>
         <div className="spss-output-tree-list">
-          <div className="spss-tree-node level-0" style={{ fontWeight: 600 }}>
-            <span>📁</span> Output Document
+          <div
+            className={`spss-tree-node level-0 ${!selectedOutputId ? 'active' : ''}`}
+            style={{ fontWeight: 700 }}
+            onClick={() => {
+              setSelectedOutputId(null);
+              setSelectedNavId(null);
+              const firstCard = Object.values(itemRefs.current)[0];
+              firstCard?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+          >
+            <span>📁</span>
+            <span>Output Document ({outputs.length})</span>
           </div>
+
           {outputs.map((item) => {
             const isChart = ['chart', 'histogram_curve', 'scatter_regression', 'boxplot_chart', 'qqplot_chart', 'kaplan_meier'].includes(item.type);
+            const isBranchCollapsed = allNavCollapsed || Boolean(collapsedNavBranches[item.id]);
+            const subNodes = getOutlineNodes(item);
+            const isSelected = selectedOutputId === item.id;
+
             return (
               <div key={item.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                {/* Top Node */}
+                {/* Level 1: Procedure Node */}
                 <div
-                  className="spss-tree-node level-1"
-                  onClick={() => scrollToItem(item.id)}
+                  className={`spss-tree-node level-1 ${isSelected && !selectedNavId ? 'active' : ''}`}
+                  onClick={() => handleSelectNode(item.id, `output-card-${item.id}`)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                 >
-                  <span>{isChart ? '📊' : '📋'}</span>
-                  <span style={{ fontWeight: 600 }}>{item.title}</span>
+                  <button
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleNavBranch(item.id);
+                    }}
+                    title={isBranchCollapsed ? 'Expand branch' : 'Collapse branch'}
+                  >
+                    {isBranchCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                  </button>
+                  <span>{isChart ? '📊' : (isBranchCollapsed ? '📕' : '📖')}</span>
+                  <span style={{ fontWeight: isSelected ? 700 : 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.title}
+                  </span>
                 </div>
-                {/* Sub items */}
-                <div className="spss-tree-node level-2" onClick={() => scrollToItem(item.id)}>
-                  <FileText size={12} color="var(--text-muted)" />
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Log</span>
-                </div>
-                <div className="spss-tree-node level-2" onClick={() => scrollToItem(item.id)}>
-                  {isChart ? <BarChart2 size={12} color="var(--accent)" /> : <TableIcon size={12} color="var(--accent)" />}
-                  <span style={{ fontSize: 11 }}>{isChart ? 'Chart' : 'Pivot Table'}</span>
-                </div>
+
+                {/* Level 2: Sub-nodes */}
+                {!isBranchCollapsed && (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {subNodes.map((node) => {
+                      const isNodeActive = selectedNavId === node.id;
+                      let icon = <TableIcon size={12} color="var(--accent)" />;
+                      if (node.iconType === 'title') icon = <span style={{ fontSize: 11 }}>📝</span>;
+                      else if (node.iconType === 'log') icon = <FileText size={12} color="var(--text-muted)" />;
+                      else if (node.iconType === 'notes') icon = <span style={{ fontSize: 11 }}>📋</span>;
+                      else if (node.iconType === 'chart') icon = <BarChart2 size={12} color="var(--accent)" />;
+
+                      return (
+                        <div
+                          key={node.id}
+                          className={`spss-tree-node level-2 ${isNodeActive ? 'active' : ''}`}
+                          onClick={() => handleSelectNode(item.id, node.id)}
+                          title={`Jump to ${node.label}`}
+                        >
+                          {icon}
+                          <span style={{ fontSize: 11, fontWeight: isNodeActive ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {node.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
+
           {outputs.length === 0 && (
             <div style={{ padding: 16, fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
               No output entries. Run any statistical test from Analyze menu.
@@ -3836,22 +4185,39 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       <div className="spss-output-doc-pane">
         {/* Output Toolbar */}
         <div className="spss-output-toolbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button className="spss-btn" onClick={() => onExport('pdf')} title="Export Full Report as PDF">
               <Download size={13} /> Export PDF
             </button>
             <button className="spss-btn" onClick={() => onExport('word')} title="Export Report as Microsoft Word (.doc)">
               <FileText size={13} /> Export Word
             </button>
-            <button className="spss-btn" onClick={() => onExport('xlsx')} title="Export Data & Tables as Excel">
+            <button className="spss-btn" onClick={() => onExport('xlsx')} title="Export Data & Tables as Excel (.xlsx)">
               <FileSpreadsheet size={13} /> Export Excel
+            </button>
+            <button className="spss-btn" onClick={() => onExport('html')} title="Export Standalone Web Report (.html)">
+              <FileCode size={13} /> Export HTML
             </button>
             <button className="spss-btn" onClick={() => window.print()} title="Print">
               <Printer size={13} /> Print
             </button>
           </div>
-          <div>
-            <button className="spss-btn spss-btn-danger" onClick={onClearOutputs} disabled={outputs.length === 0}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {selectedOutputId && onDeleteOutputItem && (
+              <button
+                className="spss-btn spss-btn-danger"
+                onClick={() => handleDelete(selectedOutputId)}
+                title="Delete currently selected analysis (Delete or Backspace key)"
+              >
+                <Trash2 size={13} /> Delete Selected
+              </button>
+            )}
+            <button
+              className="spss-btn spss-btn-danger"
+              onClick={onClearOutputs}
+              disabled={outputs.length === 0}
+              title="Clear all outputs"
+            >
               <Trash2 size={13} /> Clear Output
             </button>
           </div>
@@ -3871,26 +4237,41 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             outputs.map((item) => (
               <div
                 key={item.id}
+                id={`output-card-${item.id}`}
                 ref={(el) => {
                   itemRefs.current[item.id] = el;
                 }}
-                className="spss-output-item-card"
+                className={`spss-output-item-card ${selectedOutputId === item.id ? 'is-selected' : ''}`}
+                onClick={() => {
+                  setSelectedOutputId(item.id);
+                  setSelectedNavId(null);
+                }}
               >
                 {/* Title & Actions */}
-                <div className="spss-output-item-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div
+                  id={`output-${item.id}-title`}
+                  className="spss-output-item-title"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                >
                   <button
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}
-                    onClick={() => toggleCollapse(item.id)}
-                    title={collapsedItems[item.id] ? 'Expand' : 'Collapse'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCollapseCard(item.id);
+                    }}
+                    title={collapsedCards[item.id] ? 'Expand card' : 'Collapse card'}
                   >
-                    {collapsedItems[item.id] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+                    {collapsedCards[item.id] ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
                   </button>
+                  {selectedOutputId === item.id && (
+                    <span className="spss-selection-indicator" title="Selected Item">▶</span>
+                  )}
                   {['chart', 'histogram_curve', 'scatter_regression', 'boxplot_chart', 'qqplot_chart', 'kaplan_meier'].includes(item.type) ? (
                     <BarChart2 size={16} color="var(--accent)" />
                   ) : (
                     <TableIcon size={16} color="var(--accent)" />
                   )}
-                  <span style={{ fontWeight: 600 }}>{item.title}</span>
+                  <span style={{ fontWeight: 700 }}>{item.title}</span>
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)', marginLeft: 'auto' }}>
                     {item.timestamp}
                   </span>
@@ -3899,8 +4280,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <button
                     className="spss-btn"
                     style={{ padding: '2px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-                    onClick={() => handleCopyTable(item.id)}
-                    title="Copy table to clipboard (TSV for Excel / Word)"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleCopyCard(item.id);
+                    }}
+                    title="Copy table to clipboard (TSV for Excel / Rich HTML for Word)"
                   >
                     {copiedId === item.id ? <Check size={12} color="var(--success)" /> : <Copy size={12} />}
                     <span>{copiedId === item.id ? 'Copied' : 'Copy Table'}</span>
@@ -3911,7 +4295,10 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <button
                       className="spss-btn spss-btn-danger"
                       style={{ padding: '2px 6px', display: 'flex', alignItems: 'center' }}
-                      onClick={() => onDeleteOutputItem(item.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(item.id);
+                      }}
                       title="Delete this output"
                     >
                       <Trash2 size={12} />
@@ -3920,17 +4307,17 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 </div>
 
                 {/* Collapsible Body */}
-                {!collapsedItems[item.id] && (
+                {!collapsedCards[item.id] && (
                   <>
                     {/* Syntax Log Box */}
                     {item.syntax && (
-                      <div className="spss-syntax-log-block">
+                      <div id={`output-${item.id}-log`} className="spss-syntax-log-block">
                         {item.syntax}
                       </div>
                     )}
 
                     {/* Standard IBM SPSS Collapsible Notes Table */}
-                    <SPSSNotesTable item={item} />
+                    <SPSSNotesTable item={item} id={`output-${item.id}-notes`} />
 
                     {/* Pivot Table / Visualization */}
                     {renderPivotContent(item)}

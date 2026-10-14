@@ -3,6 +3,24 @@ import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
 import { OutputItem } from '../types/spss';
 
+// Helper to sanitize sheet names for Excel (max 31 chars, no special prohibited chars)
+export function sanitizeSheetName(name: string, existingNames = new Set<string>()): string {
+  let cleaned = (name || 'Sheet')
+    .replace(/[\\/?*[\]:]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 28);
+  if (!cleaned) cleaned = 'Sheet';
+
+  let unique = cleaned;
+  let counter = 1;
+  while (existingNames.has(unique.toLowerCase())) {
+    unique = `${cleaned.slice(0, 26)}_${counter++}`;
+  }
+  existingNames.add(unique.toLowerCase());
+  return unique;
+}
+
 // 1. REAL PDF EXPORT (Multi-page A4 canvas export)
 export async function exportReportToPdf(datasetName: string): Promise<void> {
   const container = document.querySelector('.spss-output-doc-scroll') as HTMLElement | null;
@@ -104,42 +122,534 @@ export function exportReportToWord(outputs: OutputItem[], datasetName: string): 
   URL.revokeObjectURL(url);
 }
 
-// 3. EXCEL OUTPUT EXPORT
-export function exportReportToExcel(outputs: OutputItem[], datasetName: string): void {
-  const wb = XLSX.utils.book_new();
+// 3. STANDALONE HTML EXPORT
+export function exportReportToHtml(outputs: OutputItem[], datasetName: string): void {
+  const container = document.querySelector('.spss-output-doc-scroll');
+  const innerHtml = container ? container.innerHTML : '<p>No output generated.</p>';
   const cleanName = (datasetName || 'OpenSPSS').replace(/\.[^/.]+$/, '');
 
+  const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${cleanName} - Statistical Output Document</title>
+  <style>
+    :root {
+      --bg-window: #f0f2f5;
+      --bg-surface: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border-app: #cfd8dc;
+      --border-cell: #e2e8f0;
+      --border-header: #cbd5e1;
+      --accent: #1976d2;
+      --table-border-spss: #1e293b;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg-window);
+      color: var(--text-main);
+      padding: 32px;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .report-container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-app);
+      border-radius: 6px;
+      padding: 32px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .report-header {
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 12px;
+      margin-bottom: 28px;
+    }
+    .report-header h1 {
+      margin: 0 0 6px 0;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .report-header p {
+      margin: 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .spss-output-item-card {
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-cell);
+    }
+    .spss-output-item-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .spss-syntax-log-block {
+      background: #f8fafc;
+      border: 1px solid var(--border-cell);
+      border-left: 4px solid var(--accent);
+      padding: 8px 12px;
+      font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+      font-size: 11px;
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+    }
+    .spss-pivot-table-wrapper {
+      margin: 12px 0;
+      overflow-x: auto;
+    }
+    .spss-pivot-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .spss-pivot-table {
+      border-collapse: collapse;
+      font-size: 12px;
+      width: 100%;
+      border-top: 2px solid var(--table-border-spss);
+      border-bottom: 2px solid var(--table-border-spss);
+      margin-bottom: 8px;
+    }
+    .spss-pivot-table th {
+      border-top: 1.5px solid var(--table-border-spss);
+      border-bottom: 1px solid var(--table-border-spss);
+      padding: 4px 8px;
+      font-weight: 600;
+      background: #f8fafc;
+      text-align: right;
+    }
+    .spss-pivot-table td {
+      border-bottom: 0.5px solid var(--border-cell);
+      padding: 4px 8px;
+      text-align: right;
+    }
+    .spss-pivot-table th.align-left, .spss-pivot-table td.align-left {
+      text-align: left;
+    }
+    .spss-pivot-table th.align-center, .spss-pivot-table td.align-center {
+      text-align: center;
+    }
+    .spss-pivot-total-row td {
+      border-top: 1px solid var(--table-border-spss);
+      border-bottom: 1.5px solid var(--table-border-spss);
+      font-weight: 700;
+    }
+    .spss-pivot-notes {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    button, .spss-btn { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="report-container">
+    <div class="report-header">
+      <h1>IBM SPSS Statistics Output Document</h1>
+      <p>Dataset: <strong>${cleanName}</strong> | Created: ${new Date().toLocaleString()}</p>
+    </div>
+    ${innerHtml}
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `${cleanName}_Statistical_Report.html`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// 4. DETERMINISTIC EXCEL WORKBOOK BUILDER (Supports All Procedures)
+export function buildExcelWorkbook(outputs: OutputItem[]): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+  const existingSheetNames = new Set<string>();
   let sheetCount = 0;
+
   outputs.forEach((item) => {
-    if (item.type === 'descriptives' && item.data?.rows) {
-      const ws = XLSX.utils.json_to_sheet(item.data.rows);
-      XLSX.utils.book_append_sheet(wb, ws, `Descriptives_${++sheetCount}`.slice(0, 31));
-    } else if (item.type === 'frequencies' && item.data?.tables) {
-      item.data.tables.forEach((t: any) => {
-        if (t.rows) {
-          const ws = XLSX.utils.json_to_sheet(t.rows);
-          XLSX.utils.book_append_sheet(wb, ws, `Freq_${t.variable}`.slice(0, 31));
+    const data = item.data || {};
+    const type = item.type;
+
+    // 1. DESCRIPTIVES
+    if (type === 'descriptives') {
+      const rows = data.rows || data.descriptives;
+      if (Array.isArray(rows) && rows.length > 0) {
+        const formatted = rows.map((r: any) => ({
+          Variable: r.variable,
+          'Valid N': r.valid_n ?? '.',
+          Mean: r.mean ?? '.',
+          'Std. Error Mean': r.se_mean ?? '.',
+          'Std. Deviation': r.std_dev ?? '.',
+          Variance: r.variance ?? '.',
+          Minimum: r.min ?? '.',
+          Maximum: r.max ?? '.',
+          Skewness: r.skewness ?? '.',
+          Kurtosis: r.kurtosis ?? '.',
+        }));
+
+        if (data.valid_n_listwise !== undefined) {
+          formatted.push({
+            Variable: 'Valid N (listwise)',
+            'Valid N': data.valid_n_listwise,
+            Mean: '',
+            'Std. Error Mean': '',
+            'Std. Deviation': '',
+            Variance: '',
+            Minimum: '',
+            Maximum: '',
+            Skewness: '',
+            Kurtosis: '',
+          });
+        }
+
+        const ws = XLSX.utils.json_to_sheet(formatted);
+        const name = sanitizeSheetName(`Descriptives_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 2. FREQUENCIES
+    else if (type === 'frequencies' && Array.isArray(data.tables)) {
+      if (data.tables.length > 1) {
+        const statsSummary = data.tables.map((t: any) => ({
+          Variable: t.variable,
+          'Valid N': t.total_valid,
+          'Missing N': t.total_missing,
+          'Total N': t.total,
+        }));
+        const wsStats = XLSX.utils.json_to_sheet(statsSummary);
+        const statsSheetName = sanitizeSheetName(`Freq_Statistics_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsStats, statsSheetName);
+      }
+
+      data.tables.forEach((t: any) => {
+        const rows: any[] = [];
+        if (Array.isArray(t.rows)) {
+          t.rows.forEach((r: any) => {
+            rows.push({
+              Category: 'Valid',
+              Value: r.label !== r.value ? `${r.label} (${r.value})` : r.value,
+              Frequency: r.frequency,
+              Percent: r.percent,
+              'Valid Percent': r.valid_percent !== null && r.valid_percent !== undefined ? r.valid_percent : '.',
+              'Cumulative Percent': r.cumulative_percent !== null && r.cumulative_percent !== undefined ? r.cumulative_percent : '.',
+            });
+          });
+
+          rows.push({
+            Category: 'Valid',
+            Value: 'Total',
+            Frequency: t.total_valid,
+            Percent: t.valid_total_percent ?? (t.total > 0 ? ((t.total_valid / t.total) * 100).toFixed(1) : '100.0'),
+            'Valid Percent': '100.0',
+            'Cumulative Percent': '',
+          });
+        }
+
+        if (t.total_missing > 0 && Array.isArray(t.missing_rows)) {
+          t.missing_rows.forEach((mr: any) => {
+            rows.push({
+              Category: 'Missing',
+              Value: mr.label !== mr.value && mr.value !== '.' ? `${mr.label} (${mr.value})` : mr.label,
+              Frequency: mr.frequency,
+              Percent: mr.percent,
+              'Valid Percent': '',
+              'Cumulative Percent': '',
+            });
+          });
+          rows.push({
+            Category: 'Missing',
+            Value: 'Total',
+            Frequency: t.total_missing,
+            Percent: t.missing_total_percent ?? ((t.total_missing / (t.total || 1)) * 100).toFixed(1),
+            'Valid Percent': '',
+            'Cumulative Percent': '',
+          });
+        }
+
+        if (t.total > 0) {
+          rows.push({
+            Category: 'Total',
+            Value: 'Total',
+            Frequency: t.total,
+            Percent: '100.0',
+            'Valid Percent': '',
+            'Cumulative Percent': '',
+          });
+        }
+
+        if (rows.length > 0) {
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const name = sanitizeSheetName(`Freq_${t.variable}`, existingSheetNames);
+          XLSX.utils.book_append_sheet(wb, ws, name);
         }
       });
-    } else if (item.type === 'means_report' && item.data?.tables) {
-      item.data.tables.forEach((t: any) => {
-        if (t.rows) {
-          const ws = XLSX.utils.json_to_sheet(t.rows);
-          XLSX.utils.book_append_sheet(wb, ws, `Means_${t.dependent_variable}`.slice(0, 31));
-        }
-      });
-    } else if (item.type === 'crosstabs' && item.data?.cells) {
-      const rowsFormatted: any[] = [];
-      item.data.row_categories?.forEach((rc: string, rIdx: number) => {
-        const rowObj: Record<string, any> = { [item.data.row_var]: rc };
-        item.data.col_categories?.forEach((cc: string, cIdx: number) => {
-          rowObj[cc] = item.data.cells[rIdx]?.[cIdx]?.count ?? 0;
+    }
+
+    // 3. PEARSON CORRELATIONS
+    else if (type === 'correlations' && Array.isArray(data.matrix)) {
+      const rows: any[] = [];
+      data.matrix.forEach((rowItem: any) => {
+        const rObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'Pearson Correlation' };
+        const sigObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'Sig. (2-tailed)' };
+        const nObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'N' };
+
+        (rowItem.correlations || []).forEach((c: any) => {
+          rObj[c.var2] = c.var1 === c.var2 ? 1 : (c.coefficient ?? '.');
+          sigObj[c.var2] = c.var1 === c.var2 ? '' : (c.sig_2_tailed === 0 ? '.000' : (c.sig_2_tailed ?? '.'));
+          nObj[c.var2] = c.n ?? '.';
         });
-        rowObj['Total'] = item.data.row_totals?.[rIdx] ?? 0;
+
+        rows.push(rObj, sigObj, nObj);
+      });
+
+      if (rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const name = sanitizeSheetName(`Correlations_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 4. ONE-SAMPLE T-TEST
+    else if (type === 'one_sample_t_test') {
+      const rows: any[] = [];
+      // Table 1: Descriptives
+      if (Array.isArray(data.descriptives)) {
+        rows.push({ Section: 'One-Sample Statistics', Variable: '', 'Stat / Value': '', 'df / N': '', Sig: '', 'Mean / Diff': '', 'CI Lower': '', 'CI Upper': '' });
+        data.descriptives.forEach((d: any) => {
+          rows.push({
+            Section: 'Statistics',
+            Variable: d.variable,
+            'Stat / Value': d.mean ?? '.',
+            'df / N': d.n ?? '.',
+            Sig: '',
+            'Mean / Diff': d.std_dev ?? '.',
+            'CI Lower': d.se_mean ?? '.',
+            'CI Upper': '',
+          });
+        });
+      }
+      // Table 2: Test Results
+      if (Array.isArray(data.test_results)) {
+        rows.push({ Section: `One-Sample Test (Test Value = ${data.test_value})`, Variable: '', 'Stat / Value': '', 'df / N': '', Sig: '', 'Mean / Diff': '', 'CI Lower': '', 'CI Upper': '' });
+        data.test_results.forEach((t: any) => {
+          rows.push({
+            Section: 'Test Results',
+            Variable: t.variable,
+            'Stat / Value': t.t ?? '.',
+            'df / N': t.df ?? '.',
+            Sig: t.sig_2_tailed === 0 ? '.000' : (t.sig_2_tailed ?? '.'),
+            'Mean / Diff': t.mean_difference ?? '.',
+            'CI Lower': t.ci_lower ?? '.',
+            'CI Upper': t.ci_upper ?? '.',
+          });
+        });
+      }
+      if (rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const name = sanitizeSheetName(`OneSample_TTest_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 5. INDEPENDENT SAMPLES T-TEST
+    else if (type === 'independent_t_test') {
+      const rows: any[] = [];
+      if (Array.isArray(data.group_statistics)) {
+        rows.push({ Table: 'Group Statistics', Variable: '', Group: '', N: '', Mean: '', 'Std. Deviation': '', 'Std. Error': '' });
+        data.group_statistics.forEach((g: any) => {
+          rows.push({
+            Table: 'Group Statistics',
+            Variable: g.variable,
+            Group: g.group,
+            N: g.n,
+            Mean: g.mean,
+            'Std. Deviation': g.std_dev,
+            'Std. Error': g.se_mean,
+          });
+        });
+      }
+      if (Array.isArray(data.test_results)) {
+        rows.push({ Table: 'Independent Samples Test', Variable: '', Group: '', N: '', Mean: '', 'Std. Deviation': '', 'Std. Error': '' });
+        data.test_results.forEach((t: any) => {
+          rows.push({
+            Table: 'Equal variances assumed',
+            Variable: t.variable,
+            Group: `Levene F=${t.levene_f}, Sig=${t.levene_sig === 0 ? '.000' : t.levene_sig}`,
+            N: t.equal_var_assumed?.df ?? '.',
+            Mean: t.equal_var_assumed?.t ?? '.',
+            'Std. Deviation': t.equal_var_assumed?.sig_2_tailed === 0 ? '.000' : (t.equal_var_assumed?.sig_2_tailed ?? '.'),
+            'Std. Error': t.equal_var_assumed?.mean_diff ?? '.',
+          });
+          rows.push({
+            Table: 'Equal variances not assumed',
+            Variable: t.variable,
+            Group: 'Welch t-test',
+            N: t.equal_var_not_assumed?.df ?? '.',
+            Mean: t.equal_var_not_assumed?.t ?? '.',
+            'Std. Deviation': t.equal_var_not_assumed?.sig_2_tailed === 0 ? '.000' : (t.equal_var_not_assumed?.sig_2_tailed ?? '.'),
+            'Std. Error': t.equal_var_not_assumed?.mean_diff ?? '.',
+          });
+        });
+      }
+      if (rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const name = sanitizeSheetName(`Indep_TTest_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 6. PAIRED SAMPLES T-TEST
+    else if (type === 'paired_t_test') {
+      const rows: any[] = [];
+      if (Array.isArray(data.paired_statistics)) {
+        data.paired_statistics.forEach((p: any) => {
+          rows.push({
+            Section: 'Paired Statistics',
+            Pair: p.pair,
+            Variable: p.variable,
+            Mean: p.mean,
+            N: p.n,
+            'Std. Deviation': p.std_dev,
+            'Std. Error Mean': p.se_mean,
+          });
+        });
+      }
+      if (Array.isArray(data.paired_differences)) {
+        data.paired_differences.forEach((d: any) => {
+          rows.push({
+            Section: 'Paired Differences & Test',
+            Pair: d.pair,
+            Variable: `t=${d.t}, df=${d.df}, Sig=${d.sig_2_tailed === 0 ? '.000' : d.sig_2_tailed}`,
+            Mean: d.mean,
+            N: `95% CI [${d.ci_lower}, ${d.ci_upper}]`,
+            'Std. Deviation': d.std_dev,
+            'Std. Error Mean': d.se_mean,
+          });
+        });
+      }
+      if (rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const name = sanitizeSheetName(`Paired_TTest_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 7. ONE-WAY ANOVA
+    else if (type === 'one_way_anova') {
+      const rows: any[] = [];
+      const anova = data.anova_table || {};
+      rows.push({
+        'Source of Variation': 'Between Groups',
+        'Sum of Squares': anova.between_groups?.sum_of_squares ?? '.',
+        df: anova.between_groups?.df ?? '.',
+        'Mean Square': anova.between_groups?.mean_square ?? '.',
+        F: anova.between_groups?.f ?? '.',
+        Sig: anova.between_groups?.sig ?? '.',
+      });
+      rows.push({
+        'Source of Variation': 'Within Groups',
+        'Sum of Squares': anova.within_groups?.sum_of_squares ?? '.',
+        df: anova.within_groups?.df ?? '.',
+        'Mean Square': anova.within_groups?.mean_square ?? '.',
+        F: '',
+        Sig: '',
+      });
+      rows.push({
+        'Source of Variation': 'Total',
+        'Sum of Squares': anova.total?.sum_of_squares ?? '.',
+        df: anova.total?.df ?? '.',
+        'Mean Square': '',
+        F: '',
+        Sig: '',
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const name = sanitizeSheetName(`ANOVA_${++sheetCount}`, existingSheetNames);
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    }
+
+    // 8. LINEAR REGRESSION
+    else if (type === 'linear_regression') {
+      const rows: any[] = [];
+      // Model Summary
+      const ms = data.model_summary || {};
+      rows.push({
+        Section: 'Model Summary',
+        Item: 'Model 1',
+        Metric1: `R = ${ms.r}`,
+        Metric2: `R Square = ${ms.r_squared}`,
+        Metric3: `Adj R Square = ${ms.adjusted_r_squared}`,
+        Metric4: `Std Error = ${ms.std_error_estimate}`,
+      });
+      // Coefficients
+      if (Array.isArray(data.coefficients)) {
+        data.coefficients.forEach((c: any) => {
+          rows.push({
+            Section: 'Coefficients',
+            Item: c.term,
+            Metric1: `B = ${c.b}`,
+            Metric2: `Std. Error = ${c.se}`,
+            Metric3: `Beta = ${c.beta ?? '.'}`,
+            Metric4: `t = ${c.t}, Sig = ${c.sig}`,
+          });
+        });
+      }
+      if (rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const name = sanitizeSheetName(`Regression_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
+    }
+
+    // 9. CROSSTABS
+    else if (type === 'crosstabs' && data.cells) {
+      const rowsFormatted: any[] = [];
+      data.row_categories?.forEach((rc: string, rIdx: number) => {
+        const rowObj: Record<string, any> = { [data.row_var]: rc };
+        data.col_categories?.forEach((cc: string, cIdx: number) => {
+          rowObj[cc] = data.cells[rIdx]?.[cIdx]?.count ?? 0;
+        });
+        rowObj['Total'] = data.row_totals?.[rIdx] ?? 0;
         rowsFormatted.push(rowObj);
       });
       const ws = XLSX.utils.json_to_sheet(rowsFormatted);
-      XLSX.utils.book_append_sheet(wb, ws, `Crosstab_${++sheetCount}`.slice(0, 31));
+      const name = sanitizeSheetName(`Crosstab_${++sheetCount}`, existingSheetNames);
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    }
+
+    // 10. MEANS REPORT
+    else if (type === 'means_report' && Array.isArray(data.tables)) {
+      data.tables.forEach((t: any) => {
+        if (t.rows) {
+          const ws = XLSX.utils.json_to_sheet(t.rows);
+          const name = sanitizeSheetName(`Means_${t.dependent_variable}`, existingSheetNames);
+          XLSX.utils.book_append_sheet(wb, ws, name);
+        }
+      });
+    }
+
+    // GENERIC FALLBACK FOR TABULAR DATA
+    else if (data && typeof data === 'object') {
+      const arrData = Object.values(data).find((val) => Array.isArray(val) && val.length > 0 && typeof val[0] === 'object');
+      if (arrData) {
+        const ws = XLSX.utils.json_to_sheet(arrData as any[]);
+        const name = sanitizeSheetName(`${item.type}_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, ws, name);
+      }
     }
   });
 
@@ -148,5 +658,58 @@ export function exportReportToExcel(outputs: OutputItem[], datasetName: string):
     XLSX.utils.book_append_sheet(wb, ws, 'Summary');
   }
 
+  return wb;
+}
+
+// 5. EXCEL OUTPUT EXPORT ACTION
+export function exportReportToExcel(outputs: OutputItem[], datasetName: string): void {
+  const wb = buildExcelWorkbook(outputs);
+  const cleanName = (datasetName || 'OpenSPSS').replace(/\.[^/.]+$/, '');
   XLSX.writeFile(wb, `${cleanName}_Output_Tables.xlsx`);
+}
+
+// 6. RICH CLIPBOARD COPY (TSV + Rich HTML Table)
+export async function copyTableElementToClipboard(tableEl: HTMLElement): Promise<boolean> {
+  if (!tableEl) return false;
+
+  const rows = Array.from(tableEl.querySelectorAll('tr'));
+  const tsv = rows
+    .map((row) => {
+      const cells = Array.from(row.querySelectorAll('th, td'));
+      return cells.map((cell) => cell.textContent?.trim() || '').join('\t');
+    })
+    .join('\r\n');
+
+  // Clone table to create styled clean HTML for clipboard
+  const cloned = tableEl.cloneNode(true) as HTMLElement;
+  cloned.querySelectorAll('button, svg, .spss-copy-table-btn').forEach((b) => b.remove());
+
+  const richHtml = `
+    <table style="border-collapse: collapse; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11pt; border-top: 2pt solid #000; border-bottom: 2pt solid #000; margin: 12px 0;">
+      ${cloned.innerHTML}
+    </table>
+  `;
+
+  if (navigator?.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+    try {
+      const textBlob = new Blob([tsv], { type: 'text/plain' });
+      const htmlBlob = new Blob([richHtml], { type: 'text/html' });
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': textBlob,
+          'text/html': htmlBlob,
+        }),
+      ]);
+      return true;
+    } catch {
+      // Fallback to writeText below
+    }
+  }
+
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(tsv);
+    return true;
+  }
+
+  return false;
 }

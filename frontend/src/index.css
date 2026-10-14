@@ -875,7 +875,44 @@ tr.filtered-case-row td.spss-grid-td {
   flex-direction: column;
   gap: 12px;
   border-bottom: 1px solid var(--border-cell);
-  padding-bottom: 24px;
+  padding: 12px 14px 24px 14px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.spss-output-item-card.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background-color: rgba(11, 87, 208, 0.03);
+  box-shadow: 0 2px 8px rgba(11, 87, 208, 0.08);
+}
+
+.spss-selection-indicator {
+  color: #d93025;
+  font-size: 10px;
+  font-weight: 900;
+  margin-right: 2px;
+  user-select: none;
+}
+
+@keyframes spssTargetPulse {
+  0% {
+    background-color: rgba(11, 87, 208, 0.22);
+    outline: 2px solid var(--accent);
+  }
+  60% {
+    background-color: rgba(11, 87, 208, 0.08);
+    outline: 2px solid var(--accent);
+  }
+  100% {
+    background-color: transparent;
+    outline: 2px solid transparent;
+  }
+}
+
+.spss-target-highlight {
+  animation: spssTargetPulse 1.8s ease-out forwards;
+  border-radius: 4px;
 }
 
 .spss-output-item-title {
