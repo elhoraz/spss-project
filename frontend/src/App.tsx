@@ -847,10 +847,24 @@ export const App: React.FC = () => {
       setIsDirty(false);
       // Try exporting as true binary .sav via backend pyreadstat
       try {
+        const cleanVars = dataset.variables.map(v => ({
+          ...v,
+          measure: (v.measure || 'scale').toLowerCase(),
+        }));
         const res = await fetch(`${getApiBaseUrl()}/api/datasets/export-sav`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataset }),
+          body: JSON.stringify({
+            name: dataset.name.replace('.sav', ''),
+            variables: cleanVars,
+            rows: dataset.rows,
+            data: dataset.rows,
+            dataset: {
+              ...dataset,
+              variables: cleanVars,
+              rows: dataset.rows,
+            },
+          }),
         });
         if (res.ok) {
           const blob = await res.blob();
