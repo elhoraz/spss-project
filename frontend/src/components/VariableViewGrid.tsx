@@ -68,39 +68,55 @@ const VariableRow: React.FC<VariableRowProps> = ({
   setDragOverRowIdx,
   onReorderVariables,
 }) => {
+  const isNameFocusedRef = useRef(false);
+  const isLabelFocusedRef = useRef(false);
+  const isWidthFocusedRef = useRef(false);
+  const isDecimalsFocusedRef = useRef(false);
+  const isColumnsFocusedRef = useRef(false);
+
   const [localName, setLocalName] = useState(v.name);
   const [prevName, setPrevName] = useState(v.name);
   if (v.name !== prevName) {
     setPrevName(v.name);
-    setLocalName(v.name);
+    if (!isNameFocusedRef.current) {
+      setLocalName(v.name);
+    }
   }
 
   const [localLabel, setLocalLabel] = useState(v.label);
   const [prevLabel, setPrevLabel] = useState(v.label);
   if (v.label !== prevLabel) {
     setPrevLabel(v.label);
-    setLocalLabel(v.label);
+    if (!isLabelFocusedRef.current) {
+      setLocalLabel(v.label);
+    }
   }
 
   const [localWidth, setLocalWidth] = useState(String(v.width));
   const [prevWidth, setPrevWidth] = useState(v.width);
   if (v.width !== prevWidth) {
     setPrevWidth(v.width);
-    setLocalWidth(String(v.width));
+    if (!isWidthFocusedRef.current) {
+      setLocalWidth(String(v.width));
+    }
   }
 
   const [localDecimals, setLocalDecimals] = useState(String(v.decimals));
   const [prevDecimals, setPrevDecimals] = useState(v.decimals);
   if (v.decimals !== prevDecimals) {
     setPrevDecimals(v.decimals);
-    setLocalDecimals(String(v.decimals));
+    if (!isDecimalsFocusedRef.current) {
+      setLocalDecimals(String(v.decimals));
+    }
   }
 
   const [localColumns, setLocalColumns] = useState(String(v.columns));
   const [prevColumns, setPrevColumns] = useState(v.columns);
   if (v.columns !== prevColumns) {
     setPrevColumns(v.columns);
-    setLocalColumns(String(v.columns));
+    if (!isColumnsFocusedRef.current) {
+      setLocalColumns(String(v.columns));
+    }
   }
 
   const commitName = () => {
@@ -216,16 +232,23 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 0. Name */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <input
           ref={(el) => {
             registerCellRef(`${idx}_0`, el);
           }}
           className="spss-varview-input"
           value={localName}
-          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => {
+            isNameFocusedRef.current = true;
+            setSelectedRowIdx(idx);
+          }}
           onChange={(e) => setLocalName(e.target.value.replace(/\s+/g, '_'))}
-          onBlur={commitName}
+          onBlur={() => {
+            isNameFocusedRef.current = false;
+            commitName();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               commitName();
@@ -239,14 +262,15 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 1. Type */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <button
           ref={(el) => {
             registerCellRef(`${idx}_1`, el);
           }}
           className="spss-ellipsis-btn"
           onFocus={() => setSelectedRowIdx(idx)}
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             setSelectedRowIdx(idx);
             setSelectedTypeVarIdx(idx);
           }}
@@ -261,7 +285,7 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 2. Width */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <input
           ref={(el) => {
             registerCellRef(`${idx}_2`, el);
@@ -269,9 +293,16 @@ const VariableRow: React.FC<VariableRowProps> = ({
           type="number"
           className="spss-varview-input"
           value={localWidth}
-          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => {
+            isWidthFocusedRef.current = true;
+            setSelectedRowIdx(idx);
+          }}
           onChange={(e) => setLocalWidth(e.target.value)}
-          onBlur={commitWidth}
+          onBlur={() => {
+            isWidthFocusedRef.current = false;
+            commitWidth();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               commitWidth();
@@ -285,7 +316,7 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 3. Decimals */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <input
           ref={(el) => {
             registerCellRef(`${idx}_3`, el);
@@ -296,9 +327,16 @@ const VariableRow: React.FC<VariableRowProps> = ({
           min={0}
           max={10}
           disabled={v.type === 'String'}
-          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => {
+            isDecimalsFocusedRef.current = true;
+            setSelectedRowIdx(idx);
+          }}
           onChange={(e) => setLocalDecimals(e.target.value)}
-          onBlur={commitDecimals}
+          onBlur={() => {
+            isDecimalsFocusedRef.current = false;
+            commitDecimals();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               commitDecimals();
@@ -312,7 +350,7 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 4. Label */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <input
           ref={(el) => {
             registerCellRef(`${idx}_4`, el);
@@ -320,9 +358,16 @@ const VariableRow: React.FC<VariableRowProps> = ({
           className="spss-varview-input"
           placeholder="Variable label..."
           value={localLabel}
-          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => {
+            isLabelFocusedRef.current = true;
+            setSelectedRowIdx(idx);
+          }}
           onChange={(e) => setLocalLabel(e.target.value)}
-          onBlur={commitLabel}
+          onBlur={() => {
+            isLabelFocusedRef.current = false;
+            commitLabel();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               commitLabel();
@@ -336,14 +381,15 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 5. Values (Modal trigger) */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <button
           ref={(el) => {
             registerCellRef(`${idx}_5`, el);
           }}
           className="spss-ellipsis-btn"
           onFocus={() => setSelectedRowIdx(idx)}
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             setSelectedRowIdx(idx);
             onOpenValueLabels(v.name);
           }}
@@ -358,14 +404,15 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 6. Missing */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <button
           ref={(el) => {
             registerCellRef(`${idx}_6`, el);
           }}
           className="spss-ellipsis-btn"
           onFocus={() => setSelectedRowIdx(idx)}
-          onClick={() => {
+          onClick={(e) => {
+            e.stopPropagation();
             setSelectedRowIdx(idx);
             setSelectedMissingVarIdx(idx);
           }}
@@ -380,7 +427,7 @@ const VariableRow: React.FC<VariableRowProps> = ({
       </td>
 
       {/* 7. Columns */}
-      <td className="spss-varview-td">
+      <td className="spss-varview-td" onClick={(e) => e.stopPropagation()}>
         <input
           ref={(el) => {
             registerCellRef(`${idx}_7`, el);
@@ -388,9 +435,16 @@ const VariableRow: React.FC<VariableRowProps> = ({
           type="number"
           className="spss-varview-input"
           value={localColumns}
-          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={(e) => e.stopPropagation()}
+          onFocus={() => {
+            isColumnsFocusedRef.current = true;
+            setSelectedRowIdx(idx);
+          }}
           onChange={(e) => setLocalColumns(e.target.value)}
-          onBlur={commitColumns}
+          onBlur={() => {
+            isColumnsFocusedRef.current = false;
+            commitColumns();
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               commitColumns();
