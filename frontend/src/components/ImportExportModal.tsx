@@ -52,18 +52,28 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           return res.json();
         })
         .then((data) => {
-          if (data && data.dataset) {
+          const ds = data.dataset || (data.variables_meta && data.rows_data ? {
+            name: data.name || file.name,
+            variables: data.variables_meta,
+            rows: data.rows_data,
+          } : null);
+
+          if (ds && Array.isArray(ds.variables) && Array.isArray(ds.rows)) {
             setPreviewData({
-              name: data.dataset.name || file.name,
-              vars: data.dataset.variables || [],
-              rows: data.dataset.rows || [],
+              name: ds.name || file.name,
+              vars: ds.variables || [],
+              rows: ds.rows || [],
             });
           } else {
-            setErrorMsg('Invalid dataset returned from .sav file');
+            setErrorMsg('Invalid dataset structure returned from .sav file');
           }
         })
         .catch((err: any) => {
-          setErrorMsg('Error loading .sav file: ' + (err.message || 'Make sure backend is running'));
+          setErrorMsg(
+            `Unable to parse binary .sav file: ${err.message || 'Server connection failed'}. ` +
+            'Native SPSS binary .sav parsing relies on the Python backend with pyreadstat. ' +
+            'If working offline, please import your dataset as SPSS JSON (.sav.json), Excel (.xlsx), or CSV.'
+          );
         });
     } else if (file.name.endsWith('.json')) {
       reader.onload = (e) => {

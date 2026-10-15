@@ -409,7 +409,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       const f = factorVar;
       if (!d || !f) throw new Error('Please select a Dependent Variable and a Factor Variable for One-Way ANOVA.');
       output = await statsApiService.runOneWayAnova(currentRows, d, f);
-      if (!output) output = clientComputeAnova(currentRows, d, f, weightByVariable);
+      if (!output) output = clientComputeAnova(currentRows, d, f, weightByVariable, postHocOptions, variables);
     } else if (modalType === 'two_way_anova') {
       const d = depVar || targetVars[0];
       const fA = factorVar;
@@ -859,7 +859,15 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     } else if (modalType === 'independent_t_test') {
       syntax = `T-TEST GROUPS=${groupVar || 'gender'}('${group1Val}' '${group2Val}')\n  /VARIABLES=${targetVars.join(' ')}.`;
     } else if (modalType === 'one_way_anova') {
-      syntax = `ONEWAY ${depVar || 'salary'} BY ${factorVar || 'jobcat'}\n  /STATISTICS DESCRIPTIVES\n  /POSTHOC=TUKEY.`;
+      const selectedMethods: string[] = [];
+      if (postHocOptions.tukey) selectedMethods.push('TUKEY');
+      if (postHocOptions.bonferroni) selectedMethods.push('BONFERRONI');
+      if (postHocOptions.scheffe) selectedMethods.push('SCHEFFE');
+      if (postHocOptions.lsd) selectedMethods.push('LSD');
+      const postHocClause = selectedMethods.length > 0
+        ? `\n  /POSTHOC=${selectedMethods.join(' ')} ALPHA(${postHocOptions.significanceLevel || 0.05})`
+        : '';
+      syntax = `ONEWAY ${depVar || 'salary'} BY ${factorVar || 'jobcat'}\n  /STATISTICS DESCRIPTIVES HOMOGENEITY${postHocClause}.`;
     } else if (modalType === 'two_way_anova') {
       syntax = `UNIANOVA ${depVar || 'salary'} BY ${factorVar || 'jobcat'} ${factorVarB || 'gender'}\n  /METHOD=SSTYPE(3)\n  /INTERCEPT=INCLUDE\n  /DESIGN=${factorVar || 'jobcat'} ${factorVarB || 'gender'} ${factorVar || 'jobcat'}*${factorVarB || 'gender'}.`;
     } else if (modalType === 'linear_regression') {

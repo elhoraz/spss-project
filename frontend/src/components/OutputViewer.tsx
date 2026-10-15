@@ -203,12 +203,19 @@ const SPSSNotesTable: React.FC<{ item: OutputItem; id?: string }> = ({ item, id 
 // REPEATED MEASURES ANOVA COMPONENT (FASE 7)
 // -------------------------------------------------------------
 const RepeatedMeasuresItemView: React.FC<{ data: any }> = ({ data }) => {
-  const { descriptives = [], mauchlys_test, tests_within_subjects = [], tests_between_subjects = [] } = data;
+  const {
+    descriptives = [],
+    multivariate_tests = [],
+    multivariate_notes = [],
+    mauchlys_test,
+    tests_within_subjects = [],
+    tests_between_subjects = [],
+  } = data;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Descriptive Statistics */}
-      <div className="spss-pivot-table-wrapper" style={{ maxWidth: 460 }}>
+      <div id={`output-${data.id || 'rm'}-table-rm-descriptives`} className="spss-pivot-table-wrapper" style={{ maxWidth: 460 }}>
         <div className="spss-pivot-title">Descriptive Statistics</div>
         <table className="spss-pivot-table">
           <thead>
@@ -231,6 +238,54 @@ const RepeatedMeasuresItemView: React.FC<{ data: any }> = ({ data }) => {
           </tbody>
         </table>
       </div>
+
+      {/* Multivariate Tests */}
+      {multivariate_tests && multivariate_tests.length > 0 && (
+        <div id={`output-${data.id || 'rm'}-table-rm-multivariate`} className="spss-pivot-table-wrapper" style={{ maxWidth: 840 }}>
+          <div className="spss-pivot-title">Multivariate Tests</div>
+          <table className="spss-pivot-table">
+            <thead>
+              <tr>
+                <th className="align-left">Effect</th>
+                <th className="align-left">Test</th>
+                <th>Value</th>
+                <th>F</th>
+                <th>Hypothesis df</th>
+                <th>Error df</th>
+                <th>Sig.</th>
+                <th>Partial Eta Squared</th>
+              </tr>
+            </thead>
+            <tbody>
+              {multivariate_tests.map((m: any, idx: number) => (
+                <tr key={idx}>
+                  {idx === 0 && (
+                    <td className="align-left" rowSpan={multivariate_tests.length} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                      {m.effect}
+                    </td>
+                  )}
+                  <td className="align-left" style={{ fontWeight: 600 }}>{m.test}</td>
+                  <td>{m.value !== null ? m.value : '-'}</td>
+                  <td style={{ fontWeight: 700 }}>{m.f !== null ? m.f : '-'}</td>
+                  <td>{m.hypothesis_df}</td>
+                  <td>{m.error_df}</td>
+                  <td style={{ color: m.sig !== null && m.sig < 0.05 ? 'var(--accent)' : 'inherit', fontWeight: m.sig !== null && m.sig < 0.05 ? 700 : 400 }}>
+                    {m.sig !== null ? (m.sig < 0.001 ? '< .001' : m.sig) : '-'}
+                  </td>
+                  <td>{m.partial_eta_squared !== null ? m.partial_eta_squared : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {multivariate_notes && multivariate_notes.length > 0 && (
+            <div className="spss-pivot-notes">
+              {multivariate_notes.map((note: string, nIdx: number) => (
+                <div key={nIdx}>{String.fromCharCode(97 + nIdx)}. {note}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Mauchly's Test of Sphericity */}
       {mauchlys_test && (
@@ -1457,8 +1512,34 @@ export function getOutlineNodes(item: OutputItem): OutlineNode[] {
         nodes.push({ id: `output-${item.id}-table-homogeneity`, label: 'Test of Homogeneity of Variances', iconType: 'table' });
       }
       nodes.push({ id: `output-${item.id}-table-anova`, label: 'ANOVA', iconType: 'table' });
-      if (Array.isArray(data.post_hoc) && data.post_hoc.length > 0) {
-        nodes.push({ id: `output-${item.id}-table-posthoc`, label: 'Multiple Comparisons', iconType: 'table' });
+      if (Array.isArray(data.post_hoc_tests) && data.post_hoc_tests.length > 0) {
+        data.post_hoc_tests.forEach((t: any, idx: number) => {
+          nodes.push({
+            id: `output-${item.id}-table-posthoc-${idx}`,
+            label: `Multiple Comparisons (${t.test_name || 'Post Hoc'})`,
+            iconType: 'table',
+          });
+        });
+      } else if (Array.isArray(data.post_hoc) && data.post_hoc.length > 0) {
+        nodes.push({ id: `output-${item.id}-table-posthoc-0`, label: 'Multiple Comparisons (Tukey HSD)', iconType: 'table' });
+      }
+      break;
+
+    case 'repeated_measures_anova':
+      if (data.descriptives) {
+        nodes.push({ id: `output-${item.id}-table-rm-descriptives`, label: 'Descriptive Statistics', iconType: 'table' });
+      }
+      if (Array.isArray(data.multivariate_tests) && data.multivariate_tests.length > 0) {
+        nodes.push({ id: `output-${item.id}-table-rm-multivariate`, label: 'Multivariate Tests', iconType: 'table' });
+      }
+      if (data.mauchlys_test) {
+        nodes.push({ id: `output-${item.id}-table-rm-mauchly`, label: "Mauchly's Test of Sphericity", iconType: 'table' });
+      }
+      if (data.tests_within_subjects) {
+        nodes.push({ id: `output-${item.id}-table-rm-within`, label: 'Tests of Within-Subjects Effects', iconType: 'table' });
+      }
+      if (data.tests_between_subjects) {
+        nodes.push({ id: `output-${item.id}-table-rm-between`, label: 'Tests of Between-Subjects Effects', iconType: 'table' });
       }
       break;
 
@@ -2393,37 +2474,85 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </table>
           </SPSSPivotTableWrapper>
 
-          {data.post_hoc?.length > 0 && (
-            <SPSSPivotTableWrapper id={`output-${item.id}-table-posthoc`} title={`Multiple Comparisons: Tukey HSD (${data.dependent_variable})`}>
-              <table className="spss-pivot-table">
-                <thead>
-                  <tr>
-                    <th className="align-left">(I) {data.factor_variable}</th>
-                    <th className="align-left">(J) {data.factor_variable}</th>
-                    <th>Mean Difference (I-J)</th>
-                    <th>Std. Error</th>
-                    <th>Sig.</th>
-                    <th>95% CI Lower</th>
-                    <th>95% CI Upper</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.post_hoc.map((ph: any, i: number) => (
-                    <tr key={i}>
-                      <td className="align-left">{ph.group_i}</td>
-                      <td className="align-left">{ph.group_j}</td>
-                      <td>{ph.mean_diff}</td>
-                      <td>{ph.se}</td>
-                      <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
-                        {ph.sig} {ph.significant ? '*' : ''}
-                      </td>
-                      <td>{ph.ci_lower ?? '-'}</td>
-                      <td>{ph.ci_upper ?? '-'}</td>
+          {/* Post-Hoc Multiple Comparisons */}
+          {Array.isArray(data.post_hoc_tests) && data.post_hoc_tests.length > 0 ? (
+            data.post_hoc_tests.map((test: any, tIdx: number) => {
+              const ciPct = Math.round((1 - (test.alpha || 0.05)) * 100);
+              const testNotes = [
+                `*. The mean difference is significant at the ${test.alpha || 0.05} level.`,
+                ...(test.notes || []),
+              ];
+              return (
+                <SPSSPivotTableWrapper
+                  key={tIdx}
+                  id={`output-${item.id}-table-posthoc-${tIdx}`}
+                  title={`Multiple Comparisons: ${test.test_name} (${data.dependent_variable})`}
+                  notes={testNotes}
+                >
+                  <table className="spss-pivot-table">
+                    <thead>
+                      <tr>
+                        <th className="align-left">(I) {data.factor_variable}</th>
+                        <th className="align-left">(J) {data.factor_variable}</th>
+                        <th>Mean Difference (I-J)</th>
+                        <th>Std. Error</th>
+                        <th>Sig.</th>
+                        <th>{ciPct}% CI Lower</th>
+                        <th>{ciPct}% CI Upper</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {test.comparisons?.map((ph: any, i: number) => (
+                        <tr key={i}>
+                          <td className="align-left">{ph.group_i}</td>
+                          <td className="align-left">{ph.group_j}</td>
+                          <td>{ph.mean_diff}</td>
+                          <td>{ph.se}</td>
+                          <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
+                            {ph.sig} {ph.significant ? '*' : ''}
+                          </td>
+                          <td>{ph.ci_lower ?? '-'}</td>
+                          <td>{ph.ci_upper ?? '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </SPSSPivotTableWrapper>
+              );
+            })
+          ) : (
+            data.post_hoc?.length > 0 && (
+              <SPSSPivotTableWrapper id={`output-${item.id}-table-posthoc-0`} title={`Multiple Comparisons: Tukey HSD (${data.dependent_variable})`}>
+                <table className="spss-pivot-table">
+                  <thead>
+                    <tr>
+                      <th className="align-left">(I) {data.factor_variable}</th>
+                      <th className="align-left">(J) {data.factor_variable}</th>
+                      <th>Mean Difference (I-J)</th>
+                      <th>Std. Error</th>
+                      <th>Sig.</th>
+                      <th>95% CI Lower</th>
+                      <th>95% CI Upper</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </SPSSPivotTableWrapper>
+                  </thead>
+                  <tbody>
+                    {data.post_hoc.map((ph: any, i: number) => (
+                      <tr key={i}>
+                        <td className="align-left">{ph.group_i}</td>
+                        <td className="align-left">{ph.group_j}</td>
+                        <td>{ph.mean_diff}</td>
+                        <td>{ph.se}</td>
+                        <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
+                          {ph.sig} {ph.significant ? '*' : ''}
+                        </td>
+                        <td>{ph.ci_lower ?? '-'}</td>
+                        <td>{ph.ci_upper ?? '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </SPSSPivotTableWrapper>
+            )
           )}
         </div>
       );

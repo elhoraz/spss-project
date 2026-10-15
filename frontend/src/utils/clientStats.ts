@@ -6,6 +6,7 @@ import {
   studentTCritical,
   chiSquarePValue,
   fDistPValue,
+  fDistCritical,
   matInv,
   matDet,
   jacobiEigenvalues,
@@ -16,6 +17,7 @@ import {
   computeKolmogorovSmirnovLilliefors,
   computeLeveneTest,
   studentizedRangePValue,
+  studentizedRangeCritical,
 } from './statsMath';
 import { isMissingValue, isUserMissingValue, isSystemMissingValue } from './missingUtils';
 
@@ -1048,20 +1050,60 @@ export function clientComputePairedTTest(
   };
 }
 
+export interface AnovaPostHocOptions {
+  tukey?: boolean;
+  bonferroni?: boolean;
+  scheffe?: boolean;
+  lsd?: boolean;
+  significanceLevel?: number;
+}
+
+export interface AnovaPostHocComparison {
+  group_i: string;
+  group_j: string;
+  mean_diff: number;
+  se: number;
+  sig: number | string;
+  ci_lower: number | string;
+  ci_upper: number | string;
+  significant: boolean;
+}
+
+export interface AnovaPostHocTestResult {
+  test_name: string;
+  alpha: number;
+  comparisons: AnovaPostHocComparison[];
+  notes?: string[];
+}
+
 // 7. ONE-WAY ANOVA
 export function clientComputeAnova(
   rows: Record<string, any>[],
   depVar: string,
   factorVar: string,
-  weightVar?: string | null
+  weightVar?: string | null,
+  postHocOptions?: AnovaPostHocOptions,
+  varMeta?: VariableMeta[]
 ): OutputItem {
+  const depMeta = varMeta?.find((v) => v.name.toLowerCase() === depVar.toLowerCase());
+  const factorMeta = varMeta?.find((v) => v.name.toLowerCase() === factorVar.toLowerCase());
+
   const groups: Record<string, { val: number; w: number }[]> = {};
 
   rows.forEach((r) => {
-    const factor = String(r[factorVar]);
-    const dep = parseFloat(r[depVar]);
+    const rawFactor = r[factorVar];
+    const rawDep = r[depVar];
+
+    // Filter missing values (system missing or user defined)
+    if (isMissingValue(rawFactor, factorMeta) || isMissingValue(rawDep, depMeta)) {
+      return;
+    }
+
+    const factor = String(rawFactor ?? '').trim();
+    const dep = parseFloat(rawDep);
     const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
-    if (!isNaN(dep) && isFinite(dep) && factor !== 'undefined' && factor !== 'null' && w > 0) {
+
+    if (!isNaN(dep) && isFinite(dep) && factor !== '' && factor !== 'undefined' && factor !== 'null' && w > 0) {
       if (!groups[factor]) groups[factor] = [];
       groups[factor].push({ val: dep, w });
     }
@@ -1069,8 +1111,11 @@ export function clientComputeAnova(
 
   const groupKeys = Object.keys(groups);
   const k = groupKeys.length;
-  const descriptives: any[] = [];
+  if (k < 2) {
+    throw new Error(`One-Way ANOVA requires at least 2 distinct groups with valid observations (found ${k}).`);
+  }
 
+  const descriptives: any[] = [];
   let grandSum = 0;
   let totalN = 0;
 
@@ -1094,8 +1139,8 @@ export function clientComputeAnova(
       se_mean: Number(se.toFixed(4)),
       ci_lower: Number((mean - tCrit * se).toFixed(4)),
       ci_upper: Number((mean + tCrit * se).toFixed(4)),
-      min: Number(Math.min(...rawVals).toFixed(4)),
-      max: Number(Math.max(...rawVals).toFixed(4)),
+      min: rawVals.length > 0 ? Number(Math.min(...rawVals).toFixed(4)) : 0,
+      max: rawVals.length > 0 ? Number(Math.max(...rawVals).toFixed(4)) : 0,
     });
   });
 
@@ -1124,45 +1169,129 @@ export function clientComputeAnova(
   const fStat = msWithin > 0 ? msBetween / msWithin : 0;
   const pVal = fDistPValue(fStat, dfBetween, dfWithin);
 
-  // Post Hoc Tukey HSD (Studentized Range Distribution)
-  const postHoc: any[] = [];
-  const numPairs = (k * (k - 1)) / 2;
-  const tCritPair = studentTCritical(Math.max(1, dfWithin), 0.05 / Math.max(1, numPairs));
+  // Determine requested post-hoc tests
+  const opt = postHocOptions || { tukey: true, significanceLevel: 0.05 };
+  const alpha = typeof opt.significanceLevel === 'number' && opt.significanceLevel > 0 && opt.significanceLevel < 1
+    ? opt.significanceLevel
+    : 0.05;
 
-  for (let i = 0; i < k; i++) {
-    for (let j = i + 1; j < k; j++) {
-      const g1 = groupKeys[i];
-      const g2 = groupKeys[j];
-      const m1 = descriptives[i].mean;
-      const m2 = descriptives[j].mean;
-      const diff = m1 - m2;
-      const n1 = descriptives[i].n;
-      const n2 = descriptives[j].n;
-      const sePair = Math.sqrt(msWithin * (1 / n1 + 1 / n2));
-      const q = sePair > 0 ? Math.abs(diff) / (sePair / Math.SQRT2) : 0;
-      const pAdj = studentizedRangePValue(q, k, dfWithin);
-
-      postHoc.push({
-        group_i: g1,
-        group_j: g2,
-        mean_diff: Number(diff.toFixed(4)),
-        se: Number(sePair.toFixed(4)),
-        sig: Number(pAdj.toFixed(4)),
-        ci_lower: Number((diff - tCritPair * sePair).toFixed(4)),
-        ci_upper: Number((diff + tCritPair * sePair).toFixed(4)),
-        significant: pAdj < 0.05,
-      });
-    }
+  const activeMethods: { id: 'tukey' | 'bonferroni' | 'scheffe' | 'lsd'; name: string }[] = [];
+  if (opt.tukey || (!opt.bonferroni && !opt.scheffe && !opt.lsd)) {
+    activeMethods.push({ id: 'tukey', name: 'Tukey HSD' });
   }
+  if (opt.bonferroni) {
+    activeMethods.push({ id: 'bonferroni', name: 'Bonferroni' });
+  }
+  if (opt.scheffe) {
+    activeMethods.push({ id: 'scheffe', name: 'Scheffe' });
+  }
+  if (opt.lsd) {
+    activeMethods.push({ id: 'lsd', name: 'LSD' });
+  }
+
+  const postHocTests: AnovaPostHocTestResult[] = [];
+  const numComparisons = (k * (k - 1)) / 2;
+
+  activeMethods.forEach(({ id, name }) => {
+    const comparisons: AnovaPostHocComparison[] = [];
+    const notes: string[] = [];
+
+    if (dfWithin <= 0 || msWithin <= 0) {
+      notes.push('Post hoc comparisons cannot be computed because the within-groups degrees of freedom or mean square error are zero or negative.');
+    }
+
+    // Precalculate critical multipliers for performance & determinism
+    const qCritTukey = dfWithin > 0 ? studentizedRangeCritical(k, dfWithin, alpha) : 1;
+    const tCritBonf = dfWithin > 0 ? studentTCritical(dfWithin, alpha / Math.max(1, numComparisons)) : 1;
+    const fCritScheffe = dfWithin > 0 ? fDistCritical(k - 1, dfWithin, alpha) : 1;
+    const tCritLsd = dfWithin > 0 ? studentTCritical(dfWithin, alpha) : 1;
+
+    for (let i = 0; i < k; i++) {
+      for (let j = 0; j < k; j++) {
+        if (i === j) continue;
+        const g1 = groupKeys[i];
+        const g2 = groupKeys[j];
+        const m1 = descriptives[i].mean;
+        const m2 = descriptives[j].mean;
+        const n1 = descriptives[i].n;
+        const n2 = descriptives[j].n;
+        const diff = m1 - m2;
+
+        if (dfWithin <= 0 || msWithin <= 0 || n1 <= 0 || n2 <= 0) {
+          comparisons.push({
+            group_i: g1,
+            group_j: g2,
+            mean_diff: Number(diff.toFixed(4)),
+            se: 0,
+            sig: '.',
+            ci_lower: '.',
+            ci_upper: '.',
+            significant: false,
+          });
+          continue;
+        }
+
+        const sePair = Math.sqrt(msWithin * (1 / n1 + 1 / n2));
+        let sig = 1.0;
+        let margin = 0;
+
+        if (id === 'tukey') {
+          // Tukey-Kramer Studentized Range test
+          const q = sePair > 0 ? (Math.SQRT2 * Math.abs(diff)) / sePair : 0;
+          sig = studentizedRangePValue(q, k, dfWithin);
+          margin = (qCritTukey / Math.SQRT2) * sePair;
+        } else if (id === 'bonferroni') {
+          // Bonferroni adjusted t-test
+          const t = sePair > 0 ? Math.abs(diff) / sePair : 0;
+          const pUnadj = studentTPValue(t, dfWithin);
+          sig = Math.min(1.0, numComparisons * pUnadj);
+          margin = tCritBonf * sePair;
+        } else if (id === 'scheffe') {
+          // Scheffe conservative post-hoc test
+          const fScheffe = sePair > 0 ? Math.pow(diff, 2) / ((k - 1) * Math.pow(sePair, 2)) : 0;
+          sig = fDistPValue(fScheffe, k - 1, dfWithin);
+          margin = Math.sqrt((k - 1) * fCritScheffe) * sePair;
+        } else if (id === 'lsd') {
+          // Fisher's Least Significant Difference (unadjusted t-test)
+          const t = sePair > 0 ? Math.abs(diff) / sePair : 0;
+          sig = studentTPValue(t, dfWithin);
+          margin = tCritLsd * sePair;
+        }
+
+        const isSignificant = sig < alpha;
+
+        comparisons.push({
+          group_i: g1,
+          group_j: g2,
+          mean_diff: Number(diff.toFixed(4)),
+          se: Number(sePair.toFixed(4)),
+          sig: Number(sig.toFixed(4)),
+          ci_lower: Number((diff - margin).toFixed(4)),
+          ci_upper: Number((diff + margin).toFixed(4)),
+          significant: isSignificant,
+        });
+      }
+    }
+
+    postHocTests.push({
+      test_name: name,
+      alpha,
+      comparisons,
+      notes: notes.length > 0 ? notes : undefined,
+    });
+  });
+
+  const methodSyntaxNames = activeMethods.map((m) => m.name.toUpperCase().replace(/\s+/g, '_'));
+  const syntax = `ONEWAY ${depVar} BY ${factorVar}\n  /STATISTICS DESCRIPTIVES HOMOGENEITY\n  /POSTHOC=${methodSyntaxNames.join(' ')} ALPHA(${alpha}).${
+    weightVar ? `\nWEIGHT BY ${weightVar}.` : ''
+  }`;
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
     title: weightVar ? `One-Way ANOVA: ${depVar} by ${factorVar} (Weighted by ${weightVar})` : `One-Way ANOVA: ${depVar} by ${factorVar}`,
     type: 'one_way_anova',
-    syntax: `ONEWAY ${depVar} BY ${factorVar}\n  /STATISTICS DESCRIPTIVES\n  /POSTHOC=TUKEY ALPHA(0.05).${
-      weightVar ? `\nWEIGHT BY ${weightVar}.` : ''
-    }`,
+    syntax,
     data: {
       title: `One-Way ANOVA: ${depVar} by ${factorVar}`,
       dependent_variable: depVar,
@@ -1193,7 +1322,9 @@ export function clientComputeAnova(
           df: totalN - 1,
         },
       },
-      post_hoc: postHoc,
+      post_hoc_tests: postHocTests,
+      // Backward compatibility with previous viewers & tests
+      post_hoc: postHocTests[0]?.comparisons || [],
     },
   };
 }
@@ -4094,7 +4225,53 @@ export function clientComputeRepeatedMeasuresAnova(
   const sigSphericity = fDistPValue(fStat, dfTime, dfError);
   const partialEtaSq = (ssTime + ssError) > 0 ? ssTime / (ssTime + ssError) : 0;
 
-  // 3. Mauchly's Sphericity Test & Epsilon Calculations
+  // 3. Helmert orthonormal contrast matrix C of size (k-1) x k & Covariance Matrix Sigma
+  const p = k - 1;
+  const C: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
+  for (let m = 0; m < p; m++) {
+    const denom = Math.sqrt((m + 1) * (m + 2));
+    for (let j = 0; j <= m; j++) {
+      C[m][j] = 1 / denom;
+    }
+    C[m][m + 1] = -(m + 1) / denom;
+  }
+
+  // Covariance matrix S (k x k)
+  const cov: number[][] = Array.from({ length: k }, () => Array(k).fill(0));
+  for (let a = 0; a < k; a++) {
+    for (let b = 0; b < k; b++) {
+      let sumProd = 0;
+      validData.forEach((d) => {
+        sumProd += (d.y[a] - condMeans[a]) * (d.y[b] - condMeans[b]);
+      });
+      cov[a][b] = sumProd / (n - 1);
+    }
+  }
+
+  // Transformed covariance matrix Sigma = C * S * C^T (p x p)
+  const CS: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
+  for (let r = 0; r < p; r++) {
+    for (let c = 0; c < k; c++) {
+      let sum = 0;
+      for (let m = 0; m < k; m++) {
+        sum += C[r][m] * cov[m][c];
+      }
+      CS[r][c] = sum;
+    }
+  }
+
+  const sigma: number[][] = Array.from({ length: p }, () => Array(p).fill(0));
+  for (let r = 0; r < p; r++) {
+    for (let c = 0; c < p; c++) {
+      let sum = 0;
+      for (let m = 0; m < k; m++) {
+        sum += CS[r][m] * C[c][m];
+      }
+      sigma[r][c] = sum;
+    }
+  }
+
+  // 4. Mauchly's Sphericity Test & Epsilon Calculations (k >= 3)
   let mauchlysW = 1.0;
   let approxChiSq = 0;
   let dfMauchly = Math.max(1, (k * (k - 1)) / 2 - 1);
@@ -4104,52 +4281,6 @@ export function clientComputeRepeatedMeasuresAnova(
   const lowerBoundEpsilon = Number((1 / (k - 1)).toFixed(3));
 
   if (k >= 3) {
-    // Sample Covariance Matrix S (k x k)
-    const cov: number[][] = Array.from({ length: k }, () => Array(k).fill(0));
-    for (let a = 0; a < k; a++) {
-      for (let b = 0; b < k; b++) {
-        let sumProd = 0;
-        validData.forEach((d) => {
-          sumProd += (d.y[a] - condMeans[a]) * (d.y[b] - condMeans[b]);
-        });
-        cov[a][b] = sumProd / (n - 1);
-      }
-    }
-
-    // Helmert orthonormal contrast matrix C of size (k-1) x k
-    const p = k - 1;
-    const C: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
-    for (let m = 0; m < p; m++) {
-      const denom = Math.sqrt((m + 1) * (m + 2));
-      for (let j = 0; j <= m; j++) {
-        C[m][j] = 1 / denom;
-      }
-      C[m][m + 1] = -(m + 1) / denom;
-    }
-
-    // Transformed covariance matrix Sigma = C * S * C^T (p x p)
-    const CS: number[][] = Array.from({ length: p }, () => Array(k).fill(0));
-    for (let r = 0; r < p; r++) {
-      for (let c = 0; c < k; c++) {
-        let sum = 0;
-        for (let m = 0; m < k; m++) {
-          sum += C[r][m] * cov[m][c];
-        }
-        CS[r][c] = sum;
-      }
-    }
-
-    const sigma: number[][] = Array.from({ length: p }, () => Array(p).fill(0));
-    for (let r = 0; r < p; r++) {
-      for (let c = 0; c < p; c++) {
-        let sum = 0;
-        for (let m = 0; m < k; m++) {
-          sum += CS[r][m] * C[c][m];
-        }
-        sigma[r][c] = sum;
-      }
-    }
-
     let tr = 0;
     let trSq = 0;
     for (let i = 0; i < p; i++) {
@@ -4178,6 +4309,118 @@ export function clientComputeRepeatedMeasuresAnova(
     const denomHF = (k - 1) * ((n - 1) - (k - 1) * ggEpsilon);
     if (denomHF > 0) {
       hfEpsilon = Math.min(1.0, Math.max(ggEpsilon, (n * (k - 1) * ggEpsilon - 2) / denomHF));
+    }
+  }
+
+  // 5. Multivariate Tests (Pillai's Trace, Wilks' Lambda, Hotelling's Trace, Roy's Largest Root)
+  const zBar: number[] = new Array(p).fill(0);
+  for (let r = 0; r < p; r++) {
+    for (let c = 0; c < k; c++) {
+      zBar[r] += C[r][c] * condMeans[c];
+    }
+  }
+
+  const dfHyp = p;
+  const dfErr = n - p;
+  const multivariateTests: any[] = [];
+  const multivariateNotes: string[] = ['Exact statistic', 'Design: Intercept + Within Subjects Design: time'];
+
+  if (dfErr <= 0) {
+    multivariateNotes.push('Cannot be computed because the error degrees of freedom are zero or negative.');
+    ["Pillai's Trace", "Wilks' Lambda", "Hotelling's Trace", "Roy's Largest Root"].forEach((tName) => {
+      multivariateTests.push({
+        effect: 'time',
+        test: tName,
+        value: null,
+        f: null,
+        hypothesis_df: dfHyp,
+        error_df: Math.max(0, dfErr),
+        sig: null,
+        partial_eta_squared: null,
+      });
+    });
+  } else {
+    const sigmaInv = matInv(sigma);
+    if (!sigmaInv) {
+      multivariateNotes.push('Cannot be computed because the error covariance matrix is singular.');
+      ["Pillai's Trace", "Wilks' Lambda", "Hotelling's Trace", "Roy's Largest Root"].forEach((tName) => {
+        multivariateTests.push({
+          effect: 'time',
+          test: tName,
+          value: null,
+          f: null,
+          hypothesis_df: dfHyp,
+          error_df: dfErr,
+          sig: null,
+          partial_eta_squared: null,
+        });
+      });
+    } else {
+      const vVec: number[] = new Array(p).fill(0);
+      for (let r = 0; r < p; r++) {
+        for (let c = 0; c < p; c++) {
+          vVec[r] += sigmaInv[r][c] * zBar[c];
+        }
+      }
+
+      let tSq = 0;
+      for (let r = 0; r < p; r++) {
+        tSq += zBar[r] * vVec[r];
+      }
+      tSq *= n;
+
+      const lambda1 = Math.max(0, tSq / (n - 1));
+      const pillaiVal = lambda1 / (1 + lambda1);
+      const wilksVal = 1 / (1 + lambda1);
+      const hotellingVal = lambda1;
+      const roysVal = lambda1;
+
+      const fMulti = (dfErr / dfHyp) * lambda1;
+      const sigMulti = fDistPValue(fMulti, dfHyp, dfErr);
+      const etaSqMulti = lambda1 / (1 + lambda1);
+
+      multivariateTests.push(
+        {
+          effect: 'time',
+          test: "Pillai's Trace",
+          value: Number(pillaiVal.toFixed(3)),
+          f: Number(fMulti.toFixed(3)),
+          hypothesis_df: dfHyp,
+          error_df: dfErr,
+          sig: Number(sigMulti.toFixed(4)),
+          partial_eta_squared: Number(etaSqMulti.toFixed(3)),
+        },
+        {
+          effect: 'time',
+          test: "Wilks' Lambda",
+          value: Number(wilksVal.toFixed(3)),
+          f: Number(fMulti.toFixed(3)),
+          hypothesis_df: dfHyp,
+          error_df: dfErr,
+          sig: Number(sigMulti.toFixed(4)),
+          partial_eta_squared: Number(etaSqMulti.toFixed(3)),
+        },
+        {
+          effect: 'time',
+          test: "Hotelling's Trace",
+          value: Number(hotellingVal.toFixed(3)),
+          f: Number(fMulti.toFixed(3)),
+          hypothesis_df: dfHyp,
+          error_df: dfErr,
+          sig: Number(sigMulti.toFixed(4)),
+          partial_eta_squared: Number(etaSqMulti.toFixed(3)),
+        },
+        {
+          effect: 'time',
+          test: "Roy's Largest Root",
+          value: Number(roysVal.toFixed(3)),
+          f: Number(fMulti.toFixed(3)),
+          hypothesis_df: dfHyp,
+          error_df: dfErr,
+          sig: Number(sigMulti.toFixed(4)),
+          partial_eta_squared: Number(etaSqMulti.toFixed(3)),
+        }
+      );
     }
   }
 
@@ -4279,6 +4522,8 @@ export function clientComputeRepeatedMeasuresAnova(
       repeated_variables: repeatedVars,
       total_n: n,
       descriptives,
+      multivariate_tests: multivariateTests,
+      multivariate_notes: multivariateNotes,
       mauchlys_test: {
         withinSubjectsEffect: 'time',
         mauchlysW: Number(mauchlysW.toFixed(3)),

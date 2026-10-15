@@ -173,6 +173,8 @@ async def import_dataset_file(file: UploadFile = File(...)):
         val_labels = getattr(meta_from_sav, "variable_value_labels", {}) or {}
         var_labels = getattr(meta_from_sav, "variable_to_label", {}) or {}
         var_measures = getattr(meta_from_sav, "variable_measure", {}) or {}
+        missing_user_vals = getattr(meta_from_sav, "missing_user_values", {}) or {}
+        missing_ranges = getattr(meta_from_sav, "missing_ranges", {}) or {}
 
         for col in df.columns:
             clean_col = str(col).strip().replace(" ", "_")
@@ -185,6 +187,17 @@ async def import_dataset_file(file: UploadFile = File(...)):
             # Format value labels into { "1": "Male", "2": "Female" }
             col_vals = val_labels.get(col, {})
             formatted_vals = {str(k): str(v) for k, v in col_vals.items()} if col_vals else {}
+
+            # Format user-defined missing values if present in .sav metadata
+            missing_repr = "None"
+            if col in missing_user_vals and missing_user_vals[col]:
+                missing_repr = ", ".join(str(m) for m in missing_user_vals[col])
+            elif col in missing_ranges and missing_ranges[col]:
+                r_item = missing_ranges[col]
+                if isinstance(r_item, list) and len(r_item) > 0:
+                    r0 = r_item[0]
+                    if isinstance(r0, dict) and "lo" in r0 and "hi" in r0:
+                        missing_repr = f"{r0['lo']} thru {r0['hi']}"
             
             variables_meta.append({
                 "name": clean_col,
@@ -193,7 +206,7 @@ async def import_dataset_file(file: UploadFile = File(...)):
                 "decimals": 2 if col_type == "Numeric" else 0,
                 "label": var_labels.get(col) or str(col),
                 "values": formatted_vals,
-                "missing": "None",
+                "missing": missing_repr,
                 "columns": 8,
                 "align": "Right" if is_num else "Left",
                 "measure": measure,
@@ -241,6 +254,11 @@ async def import_dataset_file(file: UploadFile = File(...)):
         "name": file.filename,
         "variables_meta": variables_meta,
         "rows_data": records,
+        "dataset": {
+            "name": file.filename,
+            "variables": variables_meta,
+            "rows": records
+        },
         "row_count": len(records),
         "column_count": len(variables_meta),
         "blob_uri": blob_uri
@@ -252,9 +270,10 @@ async def export_dataset_sav(req: Dict[str, Any]):
         import pyreadstat
         import tempfile
         
-        name = req.get("name", "DataSet1").replace(".sav", "")
-        variables = req.get("variables", [])
-        rows = req.get("rows", [])
+        ds = req.get("dataset") if isinstance(req.get("dataset"), dict) else req
+        name = ds.get("name", "DataSet1").replace(".sav", "")
+        variables = ds.get("variables", [])
+        rows = ds.get("rows", [])
         
         df = pd.DataFrame(rows)
         # Select and order columns matching variables definition

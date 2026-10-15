@@ -352,6 +352,36 @@ export function fDistPValue(f: number, df1: number, df2: number): number {
 }
 
 /**
+ * Inverse F-distribution right-tailed critical value: F_crit such that P(F >= F_crit) = alpha.
+ * Uses high-precision bisection refinement on regularized incomplete beta function.
+ */
+export function fDistCritical(df1: number, df2: number, alpha: number = 0.05): number {
+  if (df1 <= 0 || df2 <= 0) return 1.0;
+  if (alpha <= 0 || alpha >= 1) return 1.0;
+
+  // Initial upper bracket
+  let low = 0.0;
+  let high = 10.0;
+  while (fDistPValue(high, df1, df2) > alpha && high < 1e7) {
+    high *= 2;
+  }
+
+  // Refine using bisection
+  for (let i = 0; i < 45; i++) {
+    const mid = (low + high) / 2;
+    const p = fDistPValue(mid, df1, df2);
+    if (p > alpha) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+    if (high - low < 1e-9) break;
+  }
+
+  return (low + high) / 2;
+}
+
+/**
  * Exact Chi-Square right-tailed p-value: P(ChiSq_stat >= chiSq)
  * Matching scipy.stats.chi2.sf(chiSq, df) and IBM SPSS Statistics.
  */
@@ -1407,4 +1437,31 @@ export function studentizedRangePValue(q: number, k: number, df: number): number
   const pAdj = 1.0 - Math.pow(1.0 - pSingle, Math.pow(m, 0.75));
 
   return Math.min(1.0, Math.max(0.0001, Number(pAdj.toFixed(4))));
+}
+
+/**
+ * Inverse Studentized Range Distribution critical value q_crit such that P(Q >= q_crit) = alpha.
+ * Used for exact (1 - alpha) Tukey HSD / Tukey-Kramer confidence intervals.
+ */
+export function studentizedRangeCritical(k: number, df: number, alpha: number = 0.05): number {
+  if (k <= 1 || df <= 0 || alpha <= 0 || alpha >= 1) return 1.0;
+
+  let low = 0.0;
+  let high = 10.0;
+  while (studentizedRangePValue(high, k, df) > alpha && high < 1e5) {
+    high *= 2;
+  }
+
+  for (let i = 0; i < 40; i++) {
+    const mid = (low + high) / 2;
+    const p = studentizedRangePValue(mid, k, df);
+    if (p > alpha) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+    if (high - low < 1e-8) break;
+  }
+
+  return (low + high) / 2;
 }
