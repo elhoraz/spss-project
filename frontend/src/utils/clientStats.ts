@@ -612,6 +612,19 @@ export function clientComputeCrosstabs(
   const pctUnder5 = totalCells > 0 ? ((cellsUnder5 / totalCells) * 100).toFixed(1) : '0.0';
   const minExpStr = minExpected.toFixed(2);
   const warningFootnote = `a. ${cellsUnder5} cells (${pctUnder5}%) have expected count less than 5. The minimum expected count is ${minExpStr}.`;
+  const footnotes = [warningFootnote];
+  if (rowSet.length === 2 && colSet.length === 2) {
+    footnotes.push('b. Computed only for a 2x2 table');
+  }
+
+  const rowLabels: Record<string, string> = {};
+  rowSet.forEach((cat) => {
+    rowLabels[cat] = (rowMeta?.values && rowMeta.values[cat]) ? rowMeta.values[cat] : cat;
+  });
+  const colLabels: Record<string, string> = {};
+  colSet.forEach((cat) => {
+    colLabels[cat] = (colMeta?.values && colMeta.values[cat]) ? colMeta.values[cat] : cat;
+  });
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -648,12 +661,15 @@ export function clientComputeCrosstabs(
       },
       row_categories: rowSet,
       col_categories: colSet,
+      row_labels: rowLabels,
+      col_labels: colLabels,
       cells,
       row_totals: rowTotals,
       col_totals: colTotals,
       grand_total: grandTotal,
       chi_square_tests: effectiveOptions.chiSquare ? chiTests : null,
       chi_square_footnote: warningFootnote,
+      chi_square_footnotes: footnotes,
       symmetric_measures: (effectiveOptions.phiCramer || effectiveOptions.contingencyCoeff) ? symmetricMeasures : null,
       risk_estimates: effectiveOptions.riskEstimate && riskEstimates.length > 0 ? riskEstimates : null,
     },

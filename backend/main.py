@@ -371,7 +371,22 @@ def run_frequencies(req: FrequenciesRequest):
 @app.post("/api/analyze/crosstabs")
 def run_crosstabs(req: CrosstabsRequest):
     try:
-        return apply_split_file(req, lambda d: compute_crosstabs(d, req.row_var, req.col_var, req.display_expected, req.display_row_pct, req.display_col_pct))
+        return apply_split_file(
+            req,
+            lambda d: compute_crosstabs(
+                d,
+                req.row_var,
+                req.col_var,
+                req.display_expected,
+                req.display_row_pct,
+                req.display_col_pct,
+                req.display_total_pct,
+                req.chi_square,
+                req.phi_cramer,
+                req.contingency_coeff,
+                req.risk_estimate,
+            ),
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

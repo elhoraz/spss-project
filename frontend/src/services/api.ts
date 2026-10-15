@@ -69,16 +69,52 @@ export const statsApiService = {
     };
   },
 
-  async runCrosstabs(data: Record<string, any>[], rowVar: string, colVar: string): Promise<OutputItem | null> {
-    const res = await postApi('/api/analyze/crosstabs', { row_var: rowVar, col_var: colVar, data, display_expected: true, display_row_pct: true, display_col_pct: true });
+  async runCrosstabs(data: Record<string, any>[], rowVar: string, colVar: string, options?: any): Promise<OutputItem | null> {
+    const res = await postApi('/api/analyze/crosstabs', {
+      row_var: rowVar,
+      col_var: colVar,
+      data,
+      display_expected: options?.expected ?? true,
+      display_row_pct: options?.rowPct ?? true,
+      display_col_pct: options?.colPct ?? true,
+      display_total_pct: options?.totalPct ?? false,
+      chi_square: options?.chiSquare ?? true,
+      phi_cramer: options?.phiCramer ?? false,
+      contingency_coeff: options?.contingencyCoeff ?? false,
+      risk_estimate: options?.riskEstimate ?? false,
+    });
     if (!res) return null;
     return {
       id: `ct_${Date.now()}`,
       timestamp: new Date().toLocaleTimeString(),
       title: `${rowVar} * ${colVar} Crosstabulation`,
       type: 'crosstabs',
-      syntax: `CROSSTABS\n  /TABLES=${rowVar} BY ${colVar}\n  /STATISTICS=CHISQ\n  /CELLS=COUNT EXPECTED ROW COLUMN TOTAL.`,
-      data: res,
+      syntax: `CROSSTABS\n  /TABLES=${rowVar} BY ${colVar}\n  /STATISTICS=${[
+        options?.chiSquare !== false ? 'CHISQ' : '',
+        options?.phiCramer ? 'PHI' : '',
+        options?.contingencyCoeff ? 'CC' : '',
+        options?.riskEstimate ? 'RISK' : '',
+      ].filter(Boolean).join(' ')}\n  /CELLS=${[
+        options?.observed !== false ? 'COUNT' : '',
+        options?.expected ? 'EXPECTED' : '',
+        options?.rowPct ? 'ROW' : '',
+        options?.colPct ? 'COLUMN' : '',
+        options?.totalPct ? 'TOTAL' : '',
+      ].filter(Boolean).join(' ')}.`,
+      data: {
+        ...res,
+        options: options || {
+          observed: true,
+          expected: true,
+          rowPct: true,
+          colPct: true,
+          totalPct: false,
+          chiSquare: true,
+          phiCramer: false,
+          contingencyCoeff: false,
+          riskEstimate: false,
+        },
+      },
     };
   },
 

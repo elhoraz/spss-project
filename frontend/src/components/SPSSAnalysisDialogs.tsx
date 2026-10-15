@@ -391,7 +391,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       const r = rowVar || targetVars[0];
       const c = colVar || targetVars[1];
       if (!r || !c) throw new Error('Please select both a Row variable and a Column variable for Crosstabs.');
-      output = await statsApiService.runCrosstabs(currentRows, r, c);
+      output = await statsApiService.runCrosstabs(currentRows, r, c, crosstabsOptions);
       if (!output) output = clientComputeCrosstabs(currentRows, r, c, weightByVariable, crosstabsOptions, variables);
     } else if (modalType === 'correlations') {
       const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);

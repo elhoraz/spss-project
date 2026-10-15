@@ -69,6 +69,11 @@ class CrosstabsRequest(BaseModel):
     display_expected: bool = True
     display_row_pct: bool = True
     display_col_pct: bool = True
+    display_total_pct: bool = False
+    chi_square: bool = True
+    phi_cramer: bool = False
+    contingency_coeff: bool = False
+    risk_estimate: bool = False
     split_by: Optional[str] = None
     weight_by: Optional[str] = None
 

@@ -2194,42 +2194,51 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Case Processing Summary */}
-          {data.case_summary && (
-            <SPSSPivotTableWrapper id={`output-${item.id}-table-cases`} title="Case Processing Summary">
-              <table className="spss-pivot-table">
-                <thead>
-                  <tr>
-                    <th className="align-left" rowSpan={3}></th>
-                    <th className="align-center" colSpan={6}>Cases</th>
-                  </tr>
-                  <tr>
-                    <th className="align-center" colSpan={2}>Valid</th>
-                    <th className="align-center" colSpan={2}>Missing</th>
-                    <th className="align-center" colSpan={2}>Total</th>
-                  </tr>
-                  <tr>
-                    <th>N</th>
-                    <th>Percent</th>
-                    <th>N</th>
-                    <th>Percent</th>
-                    <th>N</th>
-                    <th>Percent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="align-left" style={{ fontWeight: 600 }}>{data.row_var} * {data.col_var}</td>
-                    <td>{data.case_summary.valid}</td>
-                    <td>{data.case_summary.valid_percent}%</td>
-                    <td>{data.case_summary.missing}</td>
-                    <td>{data.case_summary.missing_percent}%</td>
-                    <td>{data.case_summary.total}</td>
-                    <td>{data.case_summary.total_percent}%</td>
-                  </tr>
-                </tbody>
-              </table>
-            </SPSSPivotTableWrapper>
-          )}
+          {data.case_summary && (() => {
+            const validN = data.case_summary.valid ?? data.case_summary.valid_n ?? 0;
+            const validPct = data.case_summary.valid_percent !== undefined ? Number(data.case_summary.valid_percent).toFixed(1) : '100.0';
+            const missingN = data.case_summary.missing ?? data.case_summary.missing_n ?? 0;
+            const missingPct = data.case_summary.missing_percent !== undefined ? Number(data.case_summary.missing_percent).toFixed(1) : '0.0';
+            const totalN = data.case_summary.total ?? data.case_summary.total_n ?? (Number(validN) + Number(missingN));
+            const totalPct = data.case_summary.total_percent !== undefined ? Number(data.case_summary.total_percent).toFixed(1) : '100.0';
+
+            return (
+              <SPSSPivotTableWrapper id={`output-${item.id}-table-cases`} title="Case Processing Summary">
+                <table className="spss-pivot-table">
+                  <thead>
+                    <tr>
+                      <th className="align-left" rowSpan={3}></th>
+                      <th className="align-center" colSpan={6}>Cases</th>
+                    </tr>
+                    <tr>
+                      <th className="align-center" colSpan={2}>Valid</th>
+                      <th className="align-center" colSpan={2}>Missing</th>
+                      <th className="align-center" colSpan={2}>Total</th>
+                    </tr>
+                    <tr>
+                      <th>N</th>
+                      <th>Percent</th>
+                      <th>N</th>
+                      <th>Percent</th>
+                      <th>N</th>
+                      <th>Percent</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{data.row_var} * {data.col_var}</td>
+                      <td>{validN}</td>
+                      <td>{validPct}%</td>
+                      <td>{missingN}</td>
+                      <td>{missingPct}%</td>
+                      <td>{totalN}</td>
+                      <td>{totalPct}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </SPSSPivotTableWrapper>
+            );
+          })()}
 
           {/* Crosstabulation Table */}
           <SPSSPivotTableWrapper id={`output-${item.id}-table-crosstab`} title={`${data.row_var} * ${data.col_var} Crosstabulation`}>
@@ -2242,13 +2251,14 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 </tr>
                 <tr>
                   {data.col_categories?.map((col: string) => (
-                    <th key={col} className="align-center">{col}</th>
+                    <th key={col} className="align-center">{data.col_labels?.[col] || col}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {data.row_categories?.map((rowCat: string, rIdx: number) => {
                   let firstMetricRendered = false;
+                  const rowLabel = data.row_labels?.[rowCat] || rowCat;
                   return (
                     <React.Fragment key={rIdx}>
                       {showCount && (() => {
@@ -2258,7 +2268,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <tr>
                             {isFirst && (
                               <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                                {rowCat}
+                                {rowLabel}
                               </td>
                             )}
                             <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
@@ -2277,7 +2287,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <tr>
                             {isFirst && (
                               <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                                {rowCat}
+                                {rowLabel}
                               </td>
                             )}
                             <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
@@ -2296,12 +2306,12 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <tr style={(!showColPct && !showTotalPct) ? { borderBottom: '1px solid var(--border-header)' } : undefined}>
                             {isFirst && (
                               <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                                {rowCat}
+                                {rowLabel}
                               </td>
                             )}
                             <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
                             {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                              <td key={cIdx}>{cell.row_percent}%</td>
+                              <td key={cIdx}>{Number(cell.row_percent ?? 0).toFixed(1)}%</td>
                             ))}
                             <td style={{ fontWeight: 600 }}>100.0%</td>
                           </tr>
@@ -2315,14 +2325,14 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <tr style={!showTotalPct ? { borderBottom: '1px solid var(--border-header)' } : undefined}>
                             {isFirst && (
                               <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                                {rowCat}
+                                {rowLabel}
                               </td>
                             )}
                             <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.col_var}</td>
                             {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                              <td key={cIdx}>{cell.col_percent ?? (data.col_totals?.[cIdx] ? Number(((cell.count / data.col_totals[cIdx]) * 100).toFixed(1)) : 0)}%</td>
+                              <td key={cIdx}>{Number(cell.col_percent ?? (data.col_totals?.[cIdx] ? ((cell.count / data.col_totals[cIdx]) * 100) : 0)).toFixed(1)}%</td>
                             ))}
-                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100).toFixed(1)) : 0}%</td>
+                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100)).toFixed(1) : '0.0'}%</td>
                           </tr>
                         );
                       })()}
@@ -2334,14 +2344,14 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
                             {isFirst && (
                               <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                                {rowCat}
+                                {rowLabel}
                               </td>
                             )}
                             <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% of Total</td>
                             {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                              <td key={cIdx}>{cell.total_percent ?? (data.grand_total > 0 ? Number(((cell.count / data.grand_total) * 100).toFixed(1)) : 0)}%</td>
+                              <td key={cIdx}>{Number(cell.total_percent ?? (data.grand_total > 0 ? ((cell.count / data.grand_total) * 100) : 0)).toFixed(1)}%</td>
                             ))}
-                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100).toFixed(1)) : 0}%</td>
+                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100)).toFixed(1) : '0.0'}%</td>
                           </tr>
                         );
                       })()}
@@ -2371,7 +2381,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <tr>
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
                     {data.col_totals?.map((colTot: number, cIdx: number) => (
-                      <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                      <td key={cIdx}>{data.grand_total > 0 ? Number(((colTot / data.grand_total) * 100)).toFixed(1) : '0.0'}%</td>
                     ))}
                     <td>100.0%</td>
                   </tr>
@@ -2389,7 +2399,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
                     <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% of Total</td>
                     {data.col_totals?.map((colTot: number, cIdx: number) => (
-                      <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                      <td key={cIdx}>{data.grand_total > 0 ? Number(((colTot / data.grand_total) * 100)).toFixed(1) : '0.0'}%</td>
                     ))}
                     <td>100.0%</td>
                   </tr>
@@ -2399,44 +2409,76 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           </SPSSPivotTableWrapper>
 
           {/* Chi-Square Tests Table */}
-          {data.chi_square_tests && (
-            <SPSSPivotTableWrapper
-              id={`output-${item.id}-table-chisquare`}
-              title="Chi-Square Tests"
-              notes={data.chi_square_footnote ? [data.chi_square_footnote] : undefined}
-            >
-              <table className="spss-pivot-table">
-                <thead>
-                  <tr>
-                    <th className="align-left">Test</th>
-                    <th>Value</th>
-                    <th>df</th>
-                    <th>Asymptotic Sig. (2-sided)</th>
-                    {hasExactSig && <th>Exact Sig. (2-sided)</th>}
-                    {hasExactSig && <th>Exact Sig. (1-sided)</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.chi_square_tests?.map((t: any, i: number) => (
-                    <tr key={i}>
-                      <td className="align-left">{t.test}</td>
-                      <td>{t.value}</td>
-                      <td>{t.df ?? '-'}</td>
-                      <td style={{ fontWeight: t.asymp_sig_2_sided < 0.05 ? 700 : 400, color: t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                        {formatSig(t.asymp_sig_2_sided)}
-                      </td>
-                      {hasExactSig && (
-                        <td>{t.exact_sig_2_sided !== undefined && t.exact_sig_2_sided !== null ? formatSig(t.exact_sig_2_sided) : ''}</td>
-                      )}
-                      {hasExactSig && (
-                        <td>{t.exact_sig_1_sided !== undefined && t.exact_sig_1_sided !== null ? formatSig(t.exact_sig_1_sided) : ''}</td>
-                      )}
+          {data.chi_square_tests && (() => {
+            const chiSquareNotes: string[] = [];
+            if (data.chi_square_footnote) chiSquareNotes.push(data.chi_square_footnote);
+            if (Array.isArray(data.chi_square_footnotes)) {
+              data.chi_square_footnotes.forEach((fn: string) => {
+                if (!chiSquareNotes.includes(fn)) chiSquareNotes.push(fn);
+              });
+            }
+            if (data.chi_square_tests?.some((t: any) => t.test?.includes('Continuity Correction')) && !chiSquareNotes.some((n: string) => n.includes('2x2'))) {
+              chiSquareNotes.push('b. Computed only for a 2x2 table');
+            }
+
+            return (
+              <SPSSPivotTableWrapper
+                id={`output-${item.id}-table-chisquare`}
+                title="Chi-Square Tests"
+                notes={chiSquareNotes.length > 0 ? chiSquareNotes : undefined}
+              >
+                <table className="spss-pivot-table">
+                  <thead>
+                    <tr>
+                      <th className="align-left"></th>
+                      <th>Value</th>
+                      <th>df</th>
+                      <th>Asymptotic Significance (2-sided)</th>
+                      {hasExactSig && <th>Exact Sig. (2-sided)</th>}
+                      {hasExactSig && <th>Exact Sig. (1-sided)</th>}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </SPSSPivotTableWrapper>
-          )}
+                  </thead>
+                  <tbody>
+                    {data.chi_square_tests?.map((t: any, i: number) => {
+                      const isPearson = t.test === 'Pearson Chi-Square' || t.test?.startsWith('Pearson Chi-Square');
+                      const isContinuity = t.test === 'Continuity Correction' || t.test?.startsWith('Continuity Correction');
+                      const isLinear = t.test === 'Linear-by-Linear Association' || t.test?.startsWith('Linear-by-Linear Association');
+
+                      return (
+                        <tr key={i}>
+                          <td className="align-left">
+                            {isPearson ? (
+                              <>Pearson Chi-Square<sup>a</sup></>
+                            ) : isContinuity ? (
+                              <>Continuity Correction<sup>b</sup></>
+                            ) : isLinear ? (
+                              <>Linear-by-Linear Association</>
+                            ) : (
+                              t.test
+                            )}
+                          </td>
+                          <td>{t.value !== null && t.value !== undefined ? t.value : ''}</td>
+                          <td>{t.df !== null && t.df !== undefined ? t.df : ''}</td>
+                          <td style={{
+                            fontWeight: typeof t.asymp_sig_2_sided === 'number' && t.asymp_sig_2_sided < 0.05 ? 700 : 400,
+                            color: typeof t.asymp_sig_2_sided === 'number' && t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit',
+                          }}>
+                            {t.asymp_sig_2_sided !== null && t.asymp_sig_2_sided !== undefined ? formatSig(t.asymp_sig_2_sided) : ''}
+                          </td>
+                          {hasExactSig && (
+                            <td>{t.exact_sig_2_sided !== undefined && t.exact_sig_2_sided !== null ? formatSig(t.exact_sig_2_sided) : ''}</td>
+                          )}
+                          {hasExactSig && (
+                            <td>{t.exact_sig_1_sided !== undefined && t.exact_sig_1_sided !== null ? formatSig(t.exact_sig_1_sided) : ''}</td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </SPSSPivotTableWrapper>
+            );
+          })()}
 
           {/* Symmetric Measures Table */}
           {data.symmetric_measures && (
@@ -2482,7 +2524,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
-                    <th className="align-left" rowSpan={2}>Statistic</th>
+                    <th className="align-left" rowSpan={2}></th>
                     <th rowSpan={2}>Value</th>
                     <th className="align-center" colSpan={2}>95% Confidence Interval</th>
                   </tr>
@@ -2496,16 +2538,18 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <tr key={idx}>
                       <td className="align-left">{re.statistic}</td>
                       <td>{re.value}</td>
-                      <td>{re.ciLower}</td>
-                      <td>{re.ciUpper}</td>
+                      <td>{re.ciLower ?? re.lower_95 ?? ''}</td>
+                      <td>{re.ciUpper ?? re.upper_95 ?? ''}</td>
                     </tr>
                   ))}
-                  <tr>
-                    <td className="align-left" style={{ fontWeight: 600 }}>N of Valid Cases</td>
-                    <td>{data.grand_total}</td>
-                    <td></td>
-                    <td></td>
-                  </tr>
+                  {!data.risk_estimates.some((re: any) => re.statistic?.includes('N of Valid Cases')) && (
+                    <tr>
+                      <td className="align-left" style={{ fontWeight: 600 }}>N of Valid Cases</td>
+                      <td>{data.grand_total}</td>
+                      <td></td>
+                      <td></td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </SPSSPivotTableWrapper>

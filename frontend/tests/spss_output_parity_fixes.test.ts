@@ -180,4 +180,56 @@ describe('SPSS Output Parity Comprehensive Verification (13 Tasks)', () => {
     assert.equal(reg.data.dependent_variable, 'salary');
     assert.deepEqual(reg.data.independent_variables, ['educ', 'id']);
   });
+
+  // Task 14: Crosstabs 2x2 Complete Parity (Case Processing Summary, Yates, Fisher, Linear-by-Linear, Footnotes)
+  it('Task 14: Crosstabs 2x2 computes complete tests (Yates, Fisher, LBL) and Case Processing Summary', () => {
+    const twoByTwoData = [
+      { x: '1', y: '1' }, { x: '1', y: '1' }, { x: '1', y: '1' },
+      { x: '1', y: '2' },
+      { x: '2', y: '1' },
+      { x: '2', y: '2' }, { x: '2', y: '2' }, { x: '2', y: '2' },
+    ];
+    const ct = clientComputeCrosstabs(twoByTwoData, 'x', 'y', null, {
+      chiSquare: true,
+      observed: true,
+      expected: true,
+      rowPct: true,
+      colPct: true,
+      totalPct: true,
+    });
+
+    const data = ct.data;
+    assert.ok(data.case_summary);
+    assert.equal(data.case_summary.valid, 8);
+    assert.equal(data.case_summary.valid_percent, 100);
+    assert.equal(data.case_summary.missing, 0);
+    assert.equal(data.case_summary.total, 8);
+
+    const testNames = data.chi_square_tests.map((t: any) => t.test);
+    assert.ok(testNames.includes('Pearson Chi-Square'));
+    assert.ok(testNames.includes('Continuity Correction'));
+    assert.ok(testNames.includes("Fisher's Exact Test"));
+    assert.ok(testNames.includes('Likelihood Ratio'));
+    assert.ok(testNames.includes('Linear-by-Linear Association'));
+    assert.ok(testNames.includes('N of Valid Cases'));
+
+    // Verify Fisher has exact sigs
+    const fisher = data.chi_square_tests.find((t: any) => t.test === "Fisher's Exact Test");
+    assert.ok(fisher.exact_sig_2_sided !== undefined);
+    assert.ok(fisher.exact_sig_1_sided !== undefined);
+    assert.equal(fisher.value, null);
+    assert.equal(fisher.df, null);
+    assert.equal(fisher.asymp_sig_2_sided, null);
+
+    // Verify N of Valid Cases has null df & sig
+    const nValid = data.chi_square_tests.find((t: any) => t.test === 'N of Valid Cases');
+    assert.equal(nValid.value, 8);
+    assert.equal(nValid.df, null);
+    assert.equal(nValid.asymp_sig_2_sided, null);
+
+    // Verify footnotes include note a and note b for 2x2
+    assert.ok(Array.isArray(data.chi_square_footnotes));
+    assert.ok(data.chi_square_footnotes.some((f: string) => f.includes('expected count less than 5')));
+    assert.ok(data.chi_square_footnotes.some((f: string) => f.includes('Computed only for a 2x2 table')));
+  });
 });
