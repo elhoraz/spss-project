@@ -23,7 +23,7 @@ import { parseExcelCell, sanitizeSpssVarName, createDefaultVariableMeta } from '
 import { employeeDataset, clinicalTrialDataset } from './data/defaultDatasets';
 import { Dataset, ActiveView, AnalysisModalType, AppTheme, OutputItem, VariableMeta } from './types/spss';
 import { clientComputeDescriptives, clientComputeFrequencies, clientRunSyntax } from './utils/clientStats';
-import { statsApiService } from './services/api';
+import { statsApiService, getApiBaseUrl } from './services/api';
 import { exportReportToPdf, exportReportToWord, exportReportToExcel, exportReportToHtml } from './utils/exportUtils';
 import { saveSessionToStorage, loadSessionFromStorage } from './utils/storage';
 
@@ -847,7 +847,7 @@ export const App: React.FC = () => {
       setIsDirty(false);
       // Try exporting as true binary .sav via backend pyreadstat
       try {
-        const res = await fetch('/api/datasets/export-sav', {
+        const res = await fetch(`${getApiBaseUrl()}/api/datasets/export-sav`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dataset }),
@@ -1176,19 +1176,35 @@ export const App: React.FC = () => {
             const newVars = [...dataset.variables];
             rowKeys.forEach((k) => {
               if (k !== 'id' && !existingVarNames.has(k)) {
-                newVars.push({
-                  name: k,
-                  type: 'Numeric',
-                  width: 8,
-                  decimals: 2,
-                  label: k,
-                  values: {},
-                  missing: 'None',
-                  columns: 8,
-                  align: 'Right',
-                  measure: 'Scale',
-                  role: 'Input',
-                });
+                if (k === 'filter_$') {
+                  newVars.push({
+                    name: 'filter_$',
+                    type: 'Numeric',
+                    width: 1,
+                    decimals: 0,
+                    label: 'filter_$ (FILTER)',
+                    values: { '0': 'Not Selected', '1': 'Selected' },
+                    missing: 'None',
+                    columns: 8,
+                    align: 'Right',
+                    measure: 'Nominal',
+                    role: 'Partition',
+                  });
+                } else {
+                  newVars.push({
+                    name: k,
+                    type: 'Numeric',
+                    width: 8,
+                    decimals: 2,
+                    label: k,
+                    values: {},
+                    missing: 'None',
+                    columns: 8,
+                    align: 'Right',
+                    measure: 'Scale',
+                    role: 'Input',
+                  });
+                }
               }
             });
             setDataset({ ...dataset, variables: newVars, rows: newRows });
@@ -1206,6 +1222,8 @@ export const App: React.FC = () => {
       {activeModal === 'value_labels' && editingVariable && (
         <ValueLabelsModal
           variable={editingVariable}
+          variables={dataset.variables}
+          onSelectVariable={(vName) => setValueLabelsVarName(vName)}
           onSave={(newValues) => {
             const idx = dataset.variables.findIndex((v) => v.name === editingVariable.name);
             if (idx >= 0) handleUpdateVariable(idx, { values: newValues });

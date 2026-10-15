@@ -3,6 +3,7 @@ import { X, Upload, CheckCircle2, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Dataset, VariableMeta } from '../types/spss';
 import { employeeDataset, clinicalTrialDataset } from '../data/defaultDatasets';
+import { getApiBaseUrl } from '../services/api';
 
 interface ImportExportModalProps {
   isOpen: boolean;
@@ -39,7 +40,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       // Native SPSS .sav via backend pyreadstat
       const formData = new FormData();
       formData.append('file', file);
-      fetch('/api/datasets/import', {
+      fetch(`${getApiBaseUrl()}/api/datasets/import`, {
         method: 'POST',
         body: formData,
       })

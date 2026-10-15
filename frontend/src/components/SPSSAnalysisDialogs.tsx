@@ -42,6 +42,7 @@ import {
   clientComputeOrdinalRegression,
   clientComputeKaplanMeier,
 } from '../utils/clientStats';
+import { evaluateFilterCondition } from '../utils/filterEvaluator';
 
 // Persist user variable selections and options per dialog modalType (standard IBM SPSS Desktop behavior)
 const spssDialogMemoryCache: Record<string, any> = {};
@@ -152,6 +153,17 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
   const [testProp, setTestProp] = useState<number>(initialMemory.testProp ?? 0.5);
   const [cutPointType, setCutPointType] = useState<'median' | 'mean' | 'custom'>(initialMemory.cutPointType ?? 'median');
   const [customCut, setCustomCut] = useState<number>(initialMemory.customCut ?? 0);
+
+  // Synchronize split and weight state when opening respective dialogs
+  useEffect(() => {
+    if (modalType === 'split_file') {
+      setSplitVar(splitByVariable || '');
+      setSplitMode(splitByVariable ? 'layered' : 'off');
+    } else if (modalType === 'weight_cases') {
+      setWeightVar(weightByVariable || '');
+      setWeightMode(weightByVariable ? 'weighted' : 'off');
+    }
+  }, [modalType, splitByVariable, weightByVariable]);
 
   // Sync memory cache on state changes
   useEffect(() => {
@@ -526,17 +538,57 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         };
       }
     } else if (modalType === 'select_cases') {
+      const cond = (filterCondition || '').trim();
+      let updatedRows = currentRows;
+      let selectedCount = currentRows.length;
+      let excludedCount = 0;
+
+      if (!cond || cond.toUpperCase() === 'ALL' || cond === '1') {
+        // Reset filter - all cases active
+        updatedRows = currentRows.map((r) => {
+          const copy = { ...r };
+          delete copy['filter_$'];
+          return copy;
+        });
+        selectedCount = updatedRows.length;
+        excludedCount = 0;
+      } else {
+        // Evaluate filter condition per case
+        updatedRows = currentRows.map((row) => {
+          const isSelected = evaluateFilterCondition(cond, row);
+          if (isSelected) {
+            selectedCount++;
+          } else {
+            excludedCount++;
+          }
+          return {
+            ...row,
+            filter_$: isSelected ? 1 : 0,
+          };
+        });
+        selectedCount = updatedRows.filter((r) => r['filter_$'] === 1).length;
+        excludedCount = updatedRows.length - selectedCount;
+      }
+
+      if (onApplyDataOperation) {
+        onApplyDataOperation(updatedRows);
+      }
+
       output = {
         id: `dm_${Date.now()}`,
         timestamp: new Date().toLocaleTimeString(),
         title: 'Select Cases (Filter)',
         type: 'data_management',
-        syntax: `USE ALL.\nCOMPUTE filter_$ = (${filterCondition}).\nFILTER BY filter_$.\nEXECUTE.`,
+        syntax: cond && cond.toUpperCase() !== 'ALL'
+          ? `USE ALL.\nCOMPUTE filter_$ = (${cond}).\nVARIABLE LABELS filter_$ '${cond} (FILTER)'.\nVALUE LABELS filter_$ 0 'Not Selected' 1 'Selected'.\nFORMATS filter_$ (f1.0).\nFILTER BY filter_$.\nEXECUTE.`
+          : 'FILTER OFF.\nUSE ALL.\nEXECUTE.',
         data: {
           'Operation': 'SELECT CASES / FILTER',
-          'Filter Condition': filterCondition,
-          'Status': 'Filter active across active dataset',
-          'Cases': currentRows.length,
+          'Filter Condition': cond && cond.toUpperCase() !== 'ALL' ? cond : 'USE ALL (Filter Disabled)',
+          'Selected Cases': selectedCount,
+          'Filtered (Excluded) Cases': excludedCount,
+          'Total Cases in Active Dataset': currentRows.length,
+          'Filter Status': cond && cond.toUpperCase() !== 'ALL' ? 'Filter Active (filter_$ generated)' : 'All cases selected (No filter)',
         },
       };
     } else if (modalType === 'split_file') {
@@ -732,10 +784,21 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         return;
       }
 
+      // Filter out cases where filter_$ == 0 (IBM SPSS active filter exclusion)
+      const activeRows = rows.filter((r) => {
+        const f = r['filter_$'];
+        return f === undefined || f === null || (f !== 0 && f !== '0' && f !== false);
+      });
+
+      if (activeRows.length === 0) {
+        alert('All cases are currently excluded by the active filter. Please select cases or reset the filter under Data > Select Cases.');
+        return;
+      }
+
       // Real Split File Processing
       const splitVar = splitByVariable && variables.some((v) => v.name === splitByVariable) ? splitByVariable : null;
       if (splitVar) {
-        const rawGroupVals = rows
+        const rawGroupVals = activeRows
           .map((r) => r[splitVar])
           .filter((val) => val !== undefined && val !== null && String(val).trim() !== '');
         const distinctGroupVals = Array.from(new Set(rawGroupVals)).sort((a, b) => {
@@ -746,7 +809,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
         if (distinctGroupVals.length > 0) {
           let hasEmitted = false;
           for (const grpVal of distinctGroupVals) {
-            const subRows = rows.filter((r) => String(r[splitVar]) === String(grpVal));
+            const subRows = activeRows.filter((r) => String(r[splitVar]) === String(grpVal));
             if (subRows.length > 0) {
               const out = await executeCoreAnalysis(subRows);
               if (out) {
@@ -770,7 +833,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       }
 
       // Standard Un-split Analysis
-      const output = await executeCoreAnalysis(rows);
+      const output = await executeCoreAnalysis(activeRows);
       if (output) {
         onAnalysisComplete(output);
         onClose();
@@ -1372,8 +1435,21 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                   onChange={(e) => setFilterCondition(e.target.value)}
                   placeholder="e.g. salary > 30000 and gender = 'm'"
                 />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="spss-btn"
+                    style={{ fontSize: 11, padding: '3px 8px' }}
+                    onClick={() => setFilterCondition('ALL')}
+                  >
+                    Reset (Select All Cases)
+                  </button>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Type condition or click Reset to include all cases.
+                  </span>
+                </div>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Unselected cases will be filtered or marked for analysis exclusion.
+                  Unselected cases will receive filter_$ = 0 and be marked with a slash in Data View and excluded from subsequent statistical procedures.
                 </span>
               </div>
             ) : modalType === 'means_report' ? (

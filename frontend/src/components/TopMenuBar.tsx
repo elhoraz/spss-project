@@ -21,7 +21,7 @@ import { AnalysisModalType, ActiveView } from '../types/spss';
 interface TopMenuBarProps {
   onOpenModal: (modal: AnalysisModalType) => void;
   onSetActiveView: (view: ActiveView) => void;
-  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word') => void;
+  onExport: (format: 'pdf' | 'xlsx' | 'csv' | 'sav' | 'sav_json' | 'word' | 'html') => void;
   onResetData: () => void;
   onNewData: () => void;
   onToggleValueLabels: () => void;
@@ -161,6 +161,11 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
             <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('word'))}>
               <div className="spss-dropdown-item-left">
                 <FileText size={14} /> Export Report to Word (.doc)...
+              </div>
+            </div>
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onExport('html'))}>
+              <div className="spss-dropdown-item-left">
+                <FileText size={14} /> Export Report to HTML (.html)...
               </div>
             </div>
             <div className="spss-dropdown-divider" />
@@ -741,11 +746,15 @@ export const TopMenuBar: React.FC<TopMenuBarProps> = ({
         </button>
         {openMenu === 'extensions' && (
           <div className="spss-dropdown">
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onSetActiveView('syntax'))}>
-              Python Statistics Engine (FastAPI)
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('server_settings'))}>
+              <div className="spss-dropdown-item-left">
+                <Server size={14} /> Python Statistics Backend Server...
+              </div>
             </div>
-            <div className="spss-dropdown-item" onClick={() => handleAction(() => onSetActiveView('syntax'))}>
-              Client-Side Fast Engine (TypeScript)
+            <div className="spss-dropdown-item" onClick={() => handleAction(() => onOpenModal('server_settings'))}>
+              <div className="spss-dropdown-item-left">
+                <Sliders size={14} /> Configure API Endpoints & Extensions...
+              </div>
             </div>
           </div>
         )}

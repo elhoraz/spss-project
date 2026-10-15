@@ -1,18 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { VariableMeta } from '../types/spss';
 
 interface ValueLabelsModalProps {
   variable: VariableMeta;
+  variables?: VariableMeta[];
+  onSelectVariable?: (varName: string) => void;
   onSave: (values: Record<string, string>) => void;
   onClose: () => void;
 }
 
-export const ValueLabelsModal: React.FC<ValueLabelsModalProps> = ({ variable, onSave, onClose }) => {
+export const ValueLabelsModal: React.FC<ValueLabelsModalProps> = ({
+  variable,
+  variables,
+  onSelectVariable,
+  onSave,
+  onClose,
+}) => {
   const [valMap, setValMap] = useState<Record<string, string>>({ ...(variable.values || {}) });
   const [valueInput, setValueInput] = useState('');
   const [labelInput, setLabelInput] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    setValMap({ ...(variable.values || {}) });
+    setSelectedKey(null);
+    setValueInput('');
+    setLabelInput('');
+  }, [variable.name]);
 
   const handleAddOrChange = () => {
     if (!valueInput.trim()) return;
@@ -61,6 +76,25 @@ export const ValueLabelsModal: React.FC<ValueLabelsModalProps> = ({ variable, on
 
         {/* Body */}
         <div className="spss-modal-body" style={{ flexDirection: 'column', gap: 12 }}>
+          {/* Optional Variable Selector */}
+          {variables && variables.length > 1 && onSelectVariable && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 8, borderBottom: '1px solid var(--border-app)' }}>
+              <label style={{ width: 60, fontSize: 12, fontWeight: 600 }}>Variable:</label>
+              <select
+                className="spss-text-input"
+                style={{ flex: 1 }}
+                value={variable.name}
+                onChange={(e) => onSelectVariable(e.target.value)}
+              >
+                {variables.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} ({v.label || v.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Inputs Row */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

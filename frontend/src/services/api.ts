@@ -19,6 +19,7 @@ async function postApi(endpoint: string, payload: any): Promise<any | null> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) {
       console.warn(`API ${endpoint} failed with status ${res.status}`);
