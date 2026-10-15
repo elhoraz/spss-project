@@ -260,6 +260,109 @@ export function clientComputeFrequencies(
       });
     }
 
+    // Comprehensive Statistics for SPSS Statistics summary table
+    const computePercentile = (sortedVals: number[], p: number): number => {
+      if (sortedVals.length === 0) return 0;
+      if (sortedVals.length === 1) return sortedVals[0];
+      const pos = (sortedVals.length - 1) * p;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      if (sortedVals[base + 1] !== undefined) {
+        return sortedVals[base] + rest * (sortedVals[base + 1] - sortedVals[base]);
+      }
+      return sortedVals[base];
+    };
+
+    const pairs: { v: number; w: number }[] = [];
+    rows.forEach((r) => {
+      const raw = r[varName];
+      if (isMissingValue(raw, varMeta)) return;
+      const v = parseFloat(raw);
+      if (isNaN(v) || !isFinite(v)) return;
+      const w = weightVar ? Math.max(0, parseFloat(r[weightVar]) || 0) : 1;
+      if (w > 0) pairs.push({ v, w });
+    });
+
+    let mean: number | null = null;
+    let median: number | null = null;
+    let modeVal: number | string | null = null;
+    let hasMultipleModes = false;
+    let stdDev: number | null = null;
+    let variance: number | null = null;
+    let skewness: number | null = null;
+    let seSkewness: number | null = null;
+    let kurtosis: number | null = null;
+    let seKurtosis: number | null = null;
+    let range: number | null = null;
+    let min: number | null = null;
+    let max: number | null = null;
+    let sumVal: number | null = null;
+    let p25: number | null = null;
+    let p50: number | null = null;
+    let p75: number | null = null;
+
+    const validCountEntries = Object.entries(validCounts);
+    if (validCountEntries.length > 0) {
+      let maxCount = -1;
+      validCountEntries.forEach(([_, count]) => {
+        if (count > maxCount) maxCount = count;
+      });
+      const modeCandidates = validCountEntries
+        .filter(([_, count]) => count === maxCount)
+        .map(([val]) => val)
+        .sort((a, b) => {
+          const na = parseFloat(a);
+          const nb = parseFloat(b);
+          return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
+        });
+      if (modeCandidates.length > 1) {
+        hasMultipleModes = true;
+      }
+      const rawMode = modeCandidates[0];
+      const parsedMode = parseFloat(rawMode);
+      modeVal = !isNaN(parsedMode) ? parsedMode : (mergedLabels[rawMode] || rawMode);
+    }
+
+    if (pairs.length > 0) {
+      const sumW = pairs.reduce((acc, p) => acc + p.w, 0);
+      const sum = pairs.reduce((acc, p) => acc + p.v * p.w, 0);
+      sumVal = Number(sum.toFixed(4));
+      mean = Number((sum / sumW).toFixed(4));
+
+      const sortedPairs = [...pairs].sort((a, b) => a.v - b.v);
+      const sortedVals = sortedPairs.map((p) => p.v);
+      min = sortedVals[0];
+      max = sortedVals[sortedVals.length - 1];
+      range = Number((max - min).toFixed(4));
+
+      p25 = Number(computePercentile(sortedVals, 0.25).toFixed(4));
+      p50 = Number(computePercentile(sortedVals, 0.50).toFixed(4));
+      p75 = Number(computePercentile(sortedVals, 0.75).toFixed(4));
+      median = p50;
+
+      if (sumW > 1) {
+        const sqDiff = pairs.reduce((acc, p) => acc + p.w * Math.pow(p.v - mean!, 2), 0);
+        variance = Number((sqDiff / (sumW - 1)).toFixed(4));
+        stdDev = Number(Math.sqrt(variance).toFixed(4));
+      }
+
+      const nPairs = pairs.length;
+      if (nPairs > 2 && stdDev !== null && stdDev > 0) {
+        seSkewness = Number(Math.sqrt((6 * sumW * (sumW - 1)) / ((sumW - 2) * (sumW + 1) * (sumW + 3))).toFixed(4));
+        const m3 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean!) / stdDev!, 3), 0);
+        skewness = Number(((sumW / ((sumW - 1) * (sumW - 2))) * m3).toFixed(4));
+      }
+
+      if (nPairs > 3 && seSkewness !== null && stdDev !== null && stdDev > 0) {
+        seKurtosis = Number((2 * seSkewness * Math.sqrt((Math.pow(sumW, 2) - 1) / ((sumW - 3) * (sumW + 5)))).toFixed(4));
+        const m4 = pairs.reduce((acc, p) => acc + p.w * Math.pow((p.v - mean!) / stdDev!, 4), 0);
+        kurtosis = Number((
+          ((sumW * (sumW + 1)) / ((sumW - 1) * (sumW - 2) * (sumW - 3))) * m4 -
+          (3 * Math.pow(sumW - 1, 2)) / ((sumW - 2) * (sumW - 3))
+        ).toFixed(4));
+      }
+    }
+
     return {
       variable: varName,
       total_valid: Number(totalValid.toFixed(weightVar ? 2 : 0)),
@@ -268,6 +371,23 @@ export function clientComputeFrequencies(
       valid_percent_total: totalValid > 0 ? 100.0 : null,
       valid_total_percent: totalCount > 0 ? Number(((totalValid / totalCount) * 100).toFixed(1)) : 0,
       missing_total_percent: totalCount > 0 ? Number(((totalMissing / totalCount) * 100).toFixed(1)) : 0,
+      mean,
+      median,
+      mode: modeVal,
+      has_multiple_modes: hasMultipleModes,
+      std_dev: stdDev,
+      variance,
+      skewness,
+      se_skewness: seSkewness,
+      kurtosis,
+      se_kurtosis: seKurtosis,
+      range,
+      min,
+      max,
+      sum: sumVal,
+      percentile_25: p25,
+      percentile_50: p50,
+      percentile_75: p75,
       rows: freqRows,
       missing_rows: missingRows,
     };
@@ -457,9 +577,9 @@ export function clientComputeCrosstabs(
   // Symmetric Measures
   const sym = computeSymmetricMeasures(chiSq, grandTotal, rowSet.length, colSet.length, pVal);
   const symmetricMeasures = [
-    { measure: 'Phi', value: sym.phi, approx_sig: sym.approxSig },
-    { measure: "Cramer's V", value: sym.cramersV, approx_sig: sym.approxSig },
-    { measure: 'Contingency Coefficient', value: sym.contingencyCoeff, approx_sig: sym.approxSig },
+    { category: 'Nominal by Nominal', measure: 'Phi', value: sym.phi, approx_sig: sym.approxSig },
+    { category: 'Nominal by Nominal', measure: "Cramer's V", value: sym.cramersV, approx_sig: sym.approxSig },
+    { category: 'Nominal by Nominal', measure: 'Contingency Coefficient', value: sym.contingencyCoeff, approx_sig: sym.approxSig },
   ];
 
   // Risk Estimates (for 2x2)
@@ -1380,6 +1500,28 @@ export function clientComputeAnova(
     ssWithin += pairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - mean, 2), 0);
   });
 
+  // Total row for Descriptives (SPSS parity)
+  const allPairs = Object.values(groups).flat();
+  const allN = weightVar ? allPairs.reduce((sum, p) => sum + p.w, 0) : allPairs.length;
+  const allSum = allPairs.reduce((acc, p) => acc + p.val * p.w, 0);
+  const totalMean = allN > 0 ? allSum / allN : 0;
+  const totalStd = allN > 1 ? Math.sqrt(allPairs.reduce((acc, p) => acc + p.w * Math.pow(p.val - totalMean, 2), 0) / (allN - 1)) : 0;
+  const totalSe = allN > 0 ? totalStd / Math.sqrt(allN) : 0;
+  const allVals = allPairs.map((p) => p.val);
+  const totalTCrit = studentTCritical(Math.max(1, allN - 1), 0.05);
+
+  descriptives.push({
+    group: 'Total',
+    n: Math.round(allN),
+    mean: Number(totalMean.toFixed(4)),
+    std_dev: Number(totalStd.toFixed(4)),
+    se_mean: Number(totalSe.toFixed(4)),
+    ci_lower: Number((totalMean - totalTCrit * totalSe).toFixed(4)),
+    ci_upper: Number((totalMean + totalTCrit * totalSe).toFixed(4)),
+    min: allVals.length > 0 ? Number(Math.min(...allVals).toFixed(4)) : 0,
+    max: allVals.length > 0 ? Number(Math.max(...allVals).toFixed(4)) : 0,
+  });
+
   const dfBetween = k - 1;
   const dfWithin = Math.round(totalN - k);
   const msBetween = dfBetween > 0 ? ssBetween / dfBetween : 0;
@@ -1697,6 +1839,10 @@ export function clientComputeReliability(rows: Record<string, any>[], items: str
       items: validItems,
       n_cases: nCases,
       n_items: k,
+      total_cases: rows.length,
+      excluded_cases: rows.length - nCases,
+      valid_percent: rows.length > 0 ? Number(((nCases / rows.length) * 100).toFixed(1)) : 0,
+      excluded_percent: rows.length > 0 ? Number((((rows.length - nCases) / rows.length) * 100).toFixed(1)) : 0,
       cronbach_alpha: Number(alpha.toFixed(4)),
       scale_mean: Number(totalMean.toFixed(4)),
       scale_variance: Number(totalVariance.toFixed(4)),
@@ -2260,26 +2406,45 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
     const min = sorted[0];
     const max = sorted[sorted.length - 1];
     const range = max - min;
-    const q1 = sorted[Math.floor(n * 0.25)];
-    const q3 = sorted[Math.floor(n * 0.75)];
-    const iqr = q3 - q1;
+    const computePercentile = (p: number): number => {
+      if (sorted.length === 0) return 0;
+      if (sorted.length === 1) return sorted[0];
+      const pos = (sorted.length - 1) * p;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      if (sorted[base + 1] !== undefined) {
+        return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+      }
+      return sorted[base];
+    };
+    const q1 = computePercentile(0.25);
+    const q3 = computePercentile(0.75);
+    const iqr = Number((q3 - q1).toFixed(4));
 
     // 5% Trimmed Mean
     const trimCount = Math.floor(n * 0.05);
     const trimmedVals = sorted.slice(trimCount, n - trimCount);
     const trimmedMean = trimmedVals.reduce((a, b) => a + b, 0) / trimmedVals.length;
 
-    // Skewness & Kurtosis
+    // Skewness & Kurtosis (with Std. Errors matching SPSS)
     let skewness = 0;
+    let seSkewness = 0;
     let kurtosis = 0;
-    if (n > 2 && stdDev > 0) {
-      skewness = (vals.reduce((acc, v) => acc + Math.pow((v - mean) / stdDev, 3), 0) * n) / ((n - 1) * (n - 2));
+    let seKurtosis = 0;
+    if (n > 2) {
+      seSkewness = Math.sqrt((6 * n * (n - 1)) / ((n - 2) * (n + 1) * (n + 3)));
+      if (stdDev > 0) {
+        skewness = (vals.reduce((acc, v) => acc + Math.pow((v - mean) / stdDev, 3), 0) * n) / ((n - 1) * (n - 2));
+      }
     }
-    if (n > 3 && stdDev > 0) {
-      kurtosis =
-        (vals.reduce((acc, v) => acc + Math.pow((v - mean) / stdDev, 4), 0) * n * (n + 1)) /
-          ((n - 1) * (n - 2) * (n - 3)) -
-        (3 * Math.pow(n - 1, 2)) / ((n - 2) * (n - 3));
+    if (n > 3 && seSkewness > 0) {
+      seKurtosis = 2 * seSkewness * Math.sqrt((Math.pow(n, 2) - 1) / ((n - 3) * (n + 5)));
+      if (stdDev > 0) {
+        kurtosis =
+          (vals.reduce((acc, v) => acc + Math.pow((v - mean) / stdDev, 4), 0) * n * (n + 1)) /
+            ((n - 1) * (n - 2) * (n - 3)) -
+          (3 * Math.pow(n - 1, 2)) / ((n - 2) * (n - 3));
+      }
     }
 
     // Real Shapiro-Wilk (Royston AS R94) & Kolmogorov-Smirnov with Lilliefors correction
@@ -2323,7 +2488,9 @@ export function clientComputeExplore(rows: Record<string, any>[], variables: str
         range,
         interquartile_range: iqr,
         skewness: Number(skewness.toFixed(4)),
+        se_skewness: Number(seSkewness.toFixed(4)),
         kurtosis: Number(kurtosis.toFixed(4)),
+        se_kurtosis: Number(seKurtosis.toFixed(4)),
       },
       tests_of_normality: {
         kolmogorov_smirnov: {
@@ -2426,17 +2593,6 @@ export function clientComputeFactorAnalysis(rows: Record<string, any>[], variabl
   const { eigenvalues, eigenvectors } = jacobiEigenvalues(R);
 
   const totalVar = p;
-  let cumPct = 0;
-  const varianceExplained = eigenvalues.map((ev, i) => {
-    const pct = (Math.max(0, ev) / totalVar) * 100;
-    cumPct += pct;
-    return {
-      component: i + 1,
-      eigenvalue: Number(ev.toFixed(3)),
-      percent_of_variance: Number(pct.toFixed(2)),
-      cumulative_percent: Number(Math.min(100, cumPct).toFixed(2)),
-    };
-  });
 
   // Kaiser Criterion: Retain factors with eigenvalue >= 1.0 (at least 1)
   const selectedFactors = Math.max(1, eigenvalues.filter((ev) => ev >= 1.0).length);
@@ -2479,6 +2635,41 @@ export function clientComputeFactorAnalysis(rows: Record<string, any>[], variabl
       rowObj[`Component ${k + 1}`] = Number(rotatedLoadings[i][k].toFixed(3));
     }
     return rowObj;
+  });
+
+  // Calculate rotated sums of squared loadings
+  let cumRotPct = 0;
+  const rotationSums = Array.from({ length: selectedFactors }, (_, k) => {
+    const total = rotatedLoadings.reduce((acc, row) => acc + Math.pow(row[k], 2), 0);
+    const pct = (total / totalVar) * 100;
+    cumRotPct += pct;
+    return {
+      total: Number(total.toFixed(3)),
+      percent_of_variance: Number(pct.toFixed(2)),
+      cumulative_percent: Number(Math.min(100, cumRotPct).toFixed(2)),
+    };
+  });
+
+  let cumPct = 0;
+  let cumExtractPct = 0;
+  const varianceExplained = eigenvalues.map((ev, i) => {
+    const pct = (Math.max(0, ev) / totalVar) * 100;
+    cumPct += pct;
+    const isRetained = i < selectedFactors;
+    if (isRetained) cumExtractPct += pct;
+
+    return {
+      component: i + 1,
+      eigenvalue: Number(ev.toFixed(3)),
+      percent_of_variance: Number(pct.toFixed(2)),
+      cumulative_percent: Number(Math.min(100, cumPct).toFixed(2)),
+      extraction_total: isRetained ? Number(ev.toFixed(3)) : null,
+      extraction_percent: isRetained ? Number(pct.toFixed(2)) : null,
+      extraction_cumulative: isRetained ? Number(Math.min(100, cumExtractPct).toFixed(2)) : null,
+      rotation_total: isRetained ? rotationSums[i]?.total ?? null : null,
+      rotation_percent: isRetained ? rotationSums[i]?.percent_of_variance ?? null : null,
+      rotation_cumulative: isRetained ? rotationSums[i]?.cumulative_percent ?? null : null,
+    };
   });
 
   return {

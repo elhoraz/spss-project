@@ -188,9 +188,13 @@ describe('One-Way ANOVA Post-Hoc Pairwise Comparisons Verification', () => {
     const res = clientComputeAnova(rowsWithMissing, 'score', 'group', null, { tukey: true }, varMeta);
 
     // Total N must equal exactly 12 (the valid cases from benchmarkRows)
-    const totalN = res.data.descriptives.reduce((sum: number, d: any) => sum + d.n, 0);
+    const groupRows = res.data.descriptives.filter((d: any) => d.group !== 'Total');
+    const totalRow = res.data.descriptives.find((d: any) => d.group === 'Total');
+    const totalN = groupRows.reduce((sum: number, d: any) => sum + d.n, 0);
     assert.equal(totalN, 12, 'Missing cases must be filtered out listwise');
-    assert.equal(res.data.descriptives.length, 3);
+    assert.equal(groupRows.length, 3);
+    assert.ok(totalRow, 'Descriptives should include Total row');
+    assert.equal(totalRow.n, 12);
   });
 
   it('handles invalid inputs and insufficient groups gracefully', () => {

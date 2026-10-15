@@ -1448,6 +1448,23 @@ export interface OutlineNode {
   iconType: 'title' | 'log' | 'notes' | 'table' | 'chart';
 }
 
+// Helper to format SPSS significance / p-values consistently
+export const formatSig = (p: number | string | null | undefined): string => {
+  if (p === null || p === undefined) return '.';
+  if (typeof p === 'string') {
+    const cleaned = p.trim().replace(/\s+/g, '');
+    if (cleaned === '<.001' || cleaned === '<0.001') return '<.001';
+    const num = parseFloat(cleaned.replace('<', ''));
+    if (!isNaN(num)) {
+      if (num < 0.001) return '<.001';
+      return num.toFixed(3);
+    }
+    return p;
+  }
+  if (p < 0.001) return '<.001';
+  return p.toFixed(3);
+};
+
 export function getOutlineNodes(item: OutputItem): OutlineNode[] {
   const nodes: OutlineNode[] = [
     { id: `output-${item.id}-title`, label: 'Title', iconType: 'title' },
@@ -1467,7 +1484,7 @@ export function getOutlineNodes(item: OutputItem): OutlineNode[] {
 
     case 'frequencies':
       if (Array.isArray(data.tables)) {
-        if (data.tables.length > 1) {
+        if (data.tables.length > 0) {
           nodes.push({ id: `output-${item.id}-table-stats-summary`, label: 'Statistics', iconType: 'table' });
         }
         data.tables.forEach((t: any, idx: number) => {
@@ -1884,14 +1901,29 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           <table className="spss-pivot-table">
             <thead>
               <tr>
-                <th className="align-left">Variable</th>
+                <th className="align-left" rowSpan={2}></th>
                 <th>N</th>
+                <th>Range</th>
                 <th>Minimum</th>
                 <th>Maximum</th>
                 <th>Mean</th>
-                <th>Std. Error</th>
                 <th>Std. Deviation</th>
                 <th>Variance</th>
+                <th colSpan={2}>Skewness</th>
+                <th colSpan={2}>Kurtosis</th>
+              </tr>
+              <tr>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Statistic</th>
+                <th>Std. Error</th>
+                <th>Statistic</th>
+                <th>Std. Error</th>
               </tr>
             </thead>
             <tbody>
@@ -1899,17 +1931,25 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <tr key={i}>
                   <td className="align-left" style={{ fontWeight: 600 }}>{row.variable}</td>
                   <td>{row.valid_n ?? '.'}</td>
+                  <td>{row.range !== null && row.range !== undefined ? row.range.toLocaleString() : '.'}</td>
                   <td>{row.min !== null && row.min !== undefined ? row.min.toLocaleString() : '.'}</td>
                   <td>{row.max !== null && row.max !== undefined ? row.max.toLocaleString() : '.'}</td>
                   <td>{row.mean !== null && row.mean !== undefined ? row.mean.toLocaleString() : '.'}</td>
-                  <td>{row.se_mean !== null && row.se_mean !== undefined ? row.se_mean : '.'}</td>
                   <td>{row.std_dev !== null && row.std_dev !== undefined ? row.std_dev.toLocaleString() : '.'}</td>
                   <td>{row.variance !== null && row.variance !== undefined ? row.variance.toLocaleString() : '.'}</td>
+                  <td>{row.skewness !== null && row.skewness !== undefined ? row.skewness.toLocaleString() : '.'}</td>
+                  <td>{row.se_skewness !== null && row.se_skewness !== undefined ? row.se_skewness.toLocaleString() : '.'}</td>
+                  <td>{row.kurtosis !== null && row.kurtosis !== undefined ? row.kurtosis.toLocaleString() : '.'}</td>
+                  <td>{row.se_kurtosis !== null && row.se_kurtosis !== undefined ? row.se_kurtosis.toLocaleString() : '.'}</td>
                 </tr>
               ))}
               <tr className="spss-pivot-total-row">
                 <td className="align-left" style={{ fontWeight: 600 }}>Valid N (listwise)</td>
                 <td>{data.valid_n_listwise ?? data.rows?.[0]?.valid_n ?? 0}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td></td>
@@ -1927,8 +1967,12 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     if (type === 'frequencies') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {data.tables && data.tables.length > 1 && (
-            <SPSSPivotTableWrapper id={`output-${item.id}-table-stats-summary`} title="Statistics">
+          {data.tables && data.tables.length > 0 && (
+            <SPSSPivotTableWrapper
+              id={`output-${item.id}-table-stats-summary`}
+              title="Statistics"
+              notes={data.tables.some((t: any) => t.has_multiple_modes) ? ['a. Multiple modes exist. The smallest value is shown'] : undefined}
+            >
               <table className="spss-pivot-table" style={{ maxWidth: 500 }}>
                 <thead>
                   <tr>
@@ -1950,6 +1994,107 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <td className="align-left">Missing</td>
                     {data.tables.map((t: any, idx: number) => (
                       <td key={idx}>{t.total_missing}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Mean</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.mean !== null && t.mean !== undefined ? t.mean : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Median</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.median !== null && t.median !== undefined ? t.median : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Mode</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>
+                        {t.mode !== null && t.mode !== undefined
+                          ? `${t.mode}${t.has_multiple_modes ? 'ª' : ''}`
+                          : '.'}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Std. Deviation</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.std_dev !== null && t.std_dev !== undefined ? t.std_dev : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Variance</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.variance !== null && t.variance !== undefined ? t.variance : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Skewness</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.skewness !== null && t.skewness !== undefined ? t.skewness : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Std. Error of Skewness</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.se_skewness !== null && t.se_skewness !== undefined ? t.se_skewness : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Kurtosis</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.kurtosis !== null && t.kurtosis !== undefined ? t.kurtosis : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Std. Error of Kurtosis</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.se_kurtosis !== null && t.se_kurtosis !== undefined ? t.se_kurtosis : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Range</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.range !== null && t.range !== undefined ? t.range : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Minimum</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.min !== null && t.min !== undefined ? t.min : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Maximum</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.max !== null && t.max !== undefined ? t.max : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" colSpan={2}>Sum</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.sum !== null && t.sum !== undefined ? t.sum : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left" rowSpan={3} style={{ verticalAlign: 'top' }}>Percentiles</td>
+                    <td className="align-left">25</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.percentile_25 !== null && t.percentile_25 !== undefined ? t.percentile_25 : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left">50</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.percentile_50 !== null && t.percentile_50 !== undefined ? t.percentile_50 : '.'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="align-left">75</td>
+                    {data.tables.map((t: any, idx: number) => (
+                      <td key={idx}>{t.percentile_75 !== null && t.percentile_75 !== undefined ? t.percentile_75 : '.'}</td>
                     ))}
                   </tr>
                 </tbody>
@@ -1977,7 +2122,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           Valid
                         </td>
                       )}
-                      <td className="align-left">{r.label !== r.value ? `${r.label} (${r.value})` : r.value}</td>
+                      <td className="align-left">{r.label !== r.value ? r.label : r.value}</td>
                       <td>{r.frequency}</td>
                       <td>{r.percent}</td>
                       <td>{r.valid_percent !== null && r.valid_percent !== undefined ? r.valid_percent : '.'}</td>
@@ -2003,7 +2148,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                             </td>
                           )}
                           <td className="align-left" style={{ color: 'var(--text-muted)' }}>
-                            {mr.label !== mr.value && mr.value !== '.' ? `${mr.label} (${mr.value})` : mr.label}
+                            {mr.label !== mr.value && mr.value !== '.' ? mr.label : mr.label}
                           </td>
                           <td>{mr.frequency}</td>
                           <td>{mr.percent}</td>
@@ -2278,13 +2423,13 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td>{t.value}</td>
                       <td>{t.df ?? '-'}</td>
                       <td style={{ fontWeight: t.asymp_sig_2_sided < 0.05 ? 700 : 400, color: t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                        {t.asymp_sig_2_sided !== null && t.asymp_sig_2_sided !== undefined ? (t.asymp_sig_2_sided === 0 ? '.000' : t.asymp_sig_2_sided) : '-'}
+                        {formatSig(t.asymp_sig_2_sided)}
                       </td>
                       {hasExactSig && (
-                        <td>{t.exact_sig_2_sided !== undefined ? (t.exact_sig_2_sided === 0 ? '.000' : t.exact_sig_2_sided) : ''}</td>
+                        <td>{t.exact_sig_2_sided !== undefined && t.exact_sig_2_sided !== null ? formatSig(t.exact_sig_2_sided) : ''}</td>
                       )}
                       {hasExactSig && (
-                        <td>{t.exact_sig_1_sided !== undefined ? (t.exact_sig_1_sided === 0 ? '.000' : t.exact_sig_1_sided) : ''}</td>
+                        <td>{t.exact_sig_1_sided !== undefined && t.exact_sig_1_sided !== null ? formatSig(t.exact_sig_1_sided) : ''}</td>
                       )}
                     </tr>
                   ))}
@@ -2301,18 +2446,26 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <tr>
                     <th className="align-left" colSpan={2}></th>
                     <th>Value</th>
-                    <th>Approximate Significance</th>
+                    <th>Approx. Sig.</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.symmetric_measures.map((sm: any, idx: number) => (
-                    <tr key={idx}>
-                      <td className="align-left" style={{ fontWeight: 600 }}>{sm.category}</td>
-                      <td className="align-left">{sm.measure}</td>
-                      <td>{sm.value}</td>
-                      <td>{sm.approx_sig !== null && sm.approx_sig !== undefined ? (sm.approx_sig === 0 ? '.000' : sm.approx_sig) : '-'}</td>
-                    </tr>
-                  ))}
+                  {data.symmetric_measures.map((sm: any, idx: number, arr: any[]) => {
+                    const isFirstOfCategory = idx === 0 || sm.category !== arr[idx - 1]?.category;
+                    const catCount = arr.filter((x: any) => x.category === sm.category).length;
+                    return (
+                      <tr key={idx}>
+                        {isFirstOfCategory && (
+                          <td className="align-left" rowSpan={catCount} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                            {sm.category}
+                          </td>
+                        )}
+                        <td className="align-left">{sm.measure}</td>
+                        <td>{sm.value}</td>
+                        <td>{formatSig(sm.approx_sig)}</td>
+                      </tr>
+                    );
+                  })}
                   <tr>
                     <td className="align-left" colSpan={2} style={{ fontWeight: 600 }}>N of Valid Cases</td>
                     <td>{data.grand_total}</td>
@@ -2402,9 +2555,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <td key={cIdx} style={{ fontSize: 11 }}>
                             {c.var1 === c.var2
                               ? ''
-                              : (c.sig !== null && c.sig !== undefined
-                                  ? (c.sig === 0 ? '.000' : c.sig)
-                                  : (c.sig_2_tailed !== null && c.sig_2_tailed !== undefined ? (c.sig_2_tailed === 0 ? '.000' : c.sig_2_tailed) : '.'))}
+                              : formatSig(c.sig ?? c.sig_2_tailed)}
                           </td>
                         ))}
                       </tr>
@@ -2461,7 +2612,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <td key={cIdx} style={{ fontSize: 11 }}>
                             {c.var1 === c.var2
                               ? '.'
-                              : (c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.')}
+                              : formatSig(c.sig)}
                           </td>
                         ))}
                       </tr>
@@ -2501,7 +2652,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                           <td key={cIdx} style={{ fontSize: 11 }}>
                             {c.var1 === c.var2
                               ? '.'
-                              : (c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.')}
+                              : formatSig(c.sig)}
                           </td>
                         ))}
                       </tr>
@@ -2579,7 +2730,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       fontWeight: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 700 : 400,
                       color: t.sig_2_tailed !== null && t.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
                     }}>
-                      {t.sig_2_tailed !== null && t.sig_2_tailed !== undefined ? (t.sig_2_tailed === 0 ? '.000' : t.sig_2_tailed) : '.'}
+                      {formatSig(t.sig_2_tailed)}
                     </td>
                     <td>{t.mean_difference !== null && t.mean_difference !== undefined ? t.mean_difference : '.'}</td>
                     <td>{t.ci_lower !== null && t.ci_lower !== undefined ? t.ci_lower : '.'}</td>
@@ -2654,16 +2805,14 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td className="align-left" rowSpan={2} style={{ fontWeight: 600, verticalAlign: 'top' }}>{t.variable}</td>
                       <td className="align-left" style={{ fontWeight: 500 }}>Equal variances assumed</td>
                       <td>{t.levene_f !== null && t.levene_f !== undefined ? t.levene_f : '.'}</td>
-                      <td>{t.levene_sig !== null && t.levene_sig !== undefined ? (t.levene_sig === 0 ? '.000' : t.levene_sig) : '.'}</td>
+                      <td>{formatSig(t.levene_sig)}</td>
                       <td>{t.equal_var_assumed?.t !== null && t.equal_var_assumed?.t !== undefined ? t.equal_var_assumed.t : '.'}</td>
                       <td>{t.equal_var_assumed?.df !== null && t.equal_var_assumed?.df !== undefined ? t.equal_var_assumed.df : '.'}</td>
                       <td style={{
                         fontWeight: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
                         color: t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
                       }}>
-                        {t.equal_var_assumed?.sig_2_tailed !== null && t.equal_var_assumed?.sig_2_tailed !== undefined
-                          ? (t.equal_var_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_assumed.sig_2_tailed)
-                          : '.'}
+                        {formatSig(t.equal_var_assumed?.sig_2_tailed)}
                       </td>
                       <td>{t.equal_var_assumed?.mean_diff !== null && t.equal_var_assumed?.mean_diff !== undefined ? t.equal_var_assumed.mean_diff : '.'}</td>
                       <td>{t.equal_var_assumed?.se_diff !== null && t.equal_var_assumed?.se_diff !== undefined ? t.equal_var_assumed.se_diff : '.'}</td>
@@ -2672,17 +2821,15 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     </tr>
                     <tr>
                       <td className="align-left" style={{ color: 'var(--text-muted)' }}>Equal variances not assumed</td>
-                      <td>.</td>
-                      <td>.</td>
+                      <td></td>
+                      <td></td>
                       <td>{t.equal_var_not_assumed?.t !== null && t.equal_var_not_assumed?.t !== undefined ? t.equal_var_not_assumed.t : '.'}</td>
                       <td>{t.equal_var_not_assumed?.df !== null && t.equal_var_not_assumed?.df !== undefined ? t.equal_var_not_assumed.df : '.'}</td>
                       <td style={{
                         fontWeight: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 700 : 400,
                         color: t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
                       }}>
-                        {t.equal_var_not_assumed?.sig_2_tailed !== null && t.equal_var_not_assumed?.sig_2_tailed !== undefined
-                          ? (t.equal_var_not_assumed.sig_2_tailed === 0 ? '.000' : t.equal_var_not_assumed.sig_2_tailed)
-                          : '.'}
+                        {formatSig(t.equal_var_not_assumed?.sig_2_tailed)}
                       </td>
                       <td>{t.equal_var_not_assumed?.mean_diff !== null && t.equal_var_not_assumed?.mean_diff !== undefined ? t.equal_var_not_assumed.mean_diff : '.'}</td>
                       <td>{t.equal_var_not_assumed?.se_diff !== null && t.equal_var_not_assumed?.se_diff !== undefined ? t.equal_var_not_assumed.se_diff : '.'}</td>
@@ -2756,7 +2903,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                         fontWeight: c.sig !== null && c.sig < 0.05 ? 700 : 400,
                         color: c.sig !== null && c.sig < 0.05 ? 'var(--accent)' : 'inherit',
                       }}>
-                        {c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.'}
+                        {formatSig(c.sig)}
                       </td>
                     </tr>
                   ))}
@@ -2802,7 +2949,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       fontWeight: d.sig_2_tailed !== null && d.sig_2_tailed < 0.05 ? 700 : 400,
                       color: d.sig_2_tailed !== null && d.sig_2_tailed < 0.05 ? 'var(--accent)' : 'inherit',
                     }}>
-                      {d.sig_2_tailed !== null && d.sig_2_tailed !== undefined ? (d.sig_2_tailed === 0 ? '.000' : d.sig_2_tailed) : '.'}
+                      {formatSig(d.sig_2_tailed)}
                     </td>
                   </tr>
                 ))}
@@ -2882,7 +3029,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             <table className="spss-pivot-table">
               <thead>
                 <tr>
-                  <th className="align-left">Source of Variation</th>
+                  <th className="align-left"></th>
                   <th>Sum of Squares</th>
                   <th>df</th>
                   <th>Mean Square</th>
@@ -2898,7 +3045,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{data.anova_table?.between_groups?.mean_square}</td>
                   <td style={{ fontWeight: 700 }}>{data.anova_table?.between_groups?.f}</td>
                   <td style={{ fontWeight: 700, color: data.anova_table?.between_groups?.sig < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                    {data.anova_table?.between_groups?.sig}
+                    {formatSig(data.anova_table?.between_groups?.sig)}
                   </td>
                 </tr>
                 <tr>
@@ -2979,7 +3126,14 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
             </table>
           </SPSSPivotTableWrapper>
 
-          <SPSSPivotTableWrapper id={`output-${item.id}-table-anova`} title="ANOVA">
+          <SPSSPivotTableWrapper
+            id={`output-${item.id}-table-anova`}
+            title="ANOVA"
+            notes={[
+              `a. Dependent Variable: ${data.dependent_variable}`,
+              `b. Predictors: (Constant), ${(data.independent_variables || []).join(', ')}`
+            ]}
+          >
             <table className="spss-pivot-table">
               <thead>
                 <tr>
@@ -2998,7 +3152,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{data.anova?.regression?.df}</td>
                   <td>{data.anova?.regression?.mean_square}</td>
                   <td style={{ fontWeight: 700 }}>{data.anova?.regression?.f}</td>
-                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{data.anova?.regression?.sig}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{formatSig(data.anova?.regression?.sig)}</td>
                 </tr>
                 <tr>
                   <td className="align-left">Residual</td>
@@ -3114,29 +3268,65 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     // 8.2 RELIABILITY (CRONBACH'S ALPHA)
     if (type === 'reliability') {
       return (
-        <div className="spss-pivot-table-wrapper">
-          <div className="spss-pivot-title">Reliability Statistics</div>
-          <table className="spss-pivot-table" style={{ maxWidth: 320 }}>
-            <thead>
-              <tr>
-                <th>Cronbach's Alpha</th>
-                <th>N of Items</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style={{ fontWeight: 700, fontSize: 13, color: data.cronbach_alpha >= 0.7 ? '#16a34a' : 'inherit' }}>
-                  {data.cronbach_alpha}
-                </td>
-                <td>{data.n_items}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Case Processing Summary */}
+          <SPSSPivotTableWrapper
+            id={`output-${item.id}-table-case-summary`}
+            title="Case Processing Summary"
+            notes={['a. Listwise deletion based on all variables in the procedure.']}
+          >
+            <table className="spss-pivot-table" style={{ maxWidth: 360 }}>
+              <thead>
+                <tr>
+                  <th className="align-left" colSpan={2}></th>
+                  <th>N</th>
+                  <th>%</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top' }}>Cases</td>
+                  <td className="align-left">Valid</td>
+                  <td>{data.n_cases}</td>
+                  <td>{data.valid_percent !== undefined ? data.valid_percent.toFixed(1) : '100.0'}</td>
+                </tr>
+                <tr>
+                  <td className="align-left">Excluded<sup>a</sup></td>
+                  <td>{data.excluded_cases ?? 0}</td>
+                  <td>{data.excluded_percent !== undefined ? data.excluded_percent.toFixed(1) : '0.0'}</td>
+                </tr>
+                <tr className="spss-pivot-total-row">
+                  <td className="align-left">Total</td>
+                  <td>{data.total_cases ?? data.n_cases}</td>
+                  <td>100.0</td>
+                </tr>
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
+
+          {/* Reliability Statistics */}
+          <SPSSPivotTableWrapper id={`output-${item.id}-table-reliability`} title="Reliability Statistics">
+            <table className="spss-pivot-table" style={{ maxWidth: 320 }}>
+              <thead>
+                <tr>
+                  <th>Cronbach's Alpha</th>
+                  <th>N of Items</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: 700, fontSize: 13, color: data.cronbach_alpha >= 0.7 ? '#16a34a' : 'inherit' }}>
+                    {data.cronbach_alpha}
+                  </td>
+                  <td>{data.n_items}</td>
+                </tr>
+              </tbody>
+            </table>
+          </SPSSPivotTableWrapper>
 
           {/* Scale Statistics */}
           {data.scale_mean !== undefined && (
-            <div style={{ marginTop: 16 }}>
-              <div className="spss-pivot-title">Scale Statistics</div>
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-scale-stats`} title="Scale Statistics">
               <table className="spss-pivot-table" style={{ maxWidth: 440 }}>
                 <thead>
                   <tr>
@@ -3155,12 +3345,11 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   </tr>
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           )}
 
           {data.item_total_statistics && (
-            <div style={{ marginTop: 16 }}>
-              <div className="spss-pivot-title">Item-Total Statistics</div>
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-item-total`} title="Item-Total Statistics">
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -3185,9 +3374,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   ))}
                 </tbody>
               </table>
-            </div>
+            </SPSSPivotTableWrapper>
           )}
-          <div className="spss-pivot-notes">a. Valid N of Cases = {data.n_cases} (Listwise deletion based on all variables in the scale).</div>
         </div>
       );
     }
@@ -3616,7 +3804,7 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 <tr>
                   <td className="align-left" style={{ paddingLeft: 24 }}>Sig.</td>
                   <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                    {data.kmo_and_bartlett?.bartlett_sig}
+                    {formatSig(data.kmo_and_bartlett?.bartlett_sig)}
                   </td>
                 </tr>
               </tbody>
@@ -3648,13 +3836,24 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
           </div>
 
           {/* Total Variance Explained */}
-          <div className="spss-pivot-table-wrapper">
+          <div className="spss-pivot-table-wrapper" id={`output-${item.id}-table-variance`}>
             <div className="spss-pivot-title">Total Variance Explained</div>
-            <table className="spss-pivot-table" style={{ maxWidth: 520 }}>
+            <table className="spss-pivot-table">
               <thead>
                 <tr>
-                  <th className="align-left">Component</th>
-                  <th>Initial Eigenvalues Total</th>
+                  <th className="align-left" rowSpan={2}>Component</th>
+                  <th colSpan={3}>Initial Eigenvalues</th>
+                  <th colSpan={3}>Extraction Sums of Squared Loadings</th>
+                  <th colSpan={3}>Rotation Sums of Squared Loadings</th>
+                </tr>
+                <tr>
+                  <th>Total</th>
+                  <th>% of Variance</th>
+                  <th>Cumulative %</th>
+                  <th>Total</th>
+                  <th>% of Variance</th>
+                  <th>Cumulative %</th>
+                  <th>Total</th>
                   <th>% of Variance</th>
                   <th>Cumulative %</th>
                 </tr>
@@ -3663,13 +3862,20 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 {data.total_variance_explained?.map((ve: any, i: number) => (
                   <tr key={i}>
                     <td className="align-left" style={{ fontWeight: 600 }}>{ve.component}</td>
-                    <td style={{ fontWeight: ve.eigenvalue >= 1.0 ? 700 : 400 }}>{ve.eigenvalue}</td>
+                    <td>{ve.eigenvalue}</td>
                     <td>{ve.percent_of_variance}</td>
                     <td style={{ fontWeight: 700 }}>{ve.cumulative_percent}</td>
+                    <td>{ve.extraction_total !== null && ve.extraction_total !== undefined ? ve.extraction_total : ''}</td>
+                    <td>{ve.extraction_percent !== null && ve.extraction_percent !== undefined ? ve.extraction_percent : ''}</td>
+                    <td style={{ fontWeight: ve.extraction_cumulative ? 700 : 400 }}>{ve.extraction_cumulative !== null && ve.extraction_cumulative !== undefined ? ve.extraction_cumulative : ''}</td>
+                    <td>{ve.rotation_total !== null && ve.rotation_total !== undefined ? ve.rotation_total : ''}</td>
+                    <td>{ve.rotation_percent !== null && ve.rotation_percent !== undefined ? ve.rotation_percent : ''}</td>
+                    <td style={{ fontWeight: ve.rotation_cumulative ? 700 : 400 }}>{ve.rotation_cumulative !== null && ve.rotation_cumulative !== undefined ? ve.rotation_cumulative : ''}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <div className="spss-pivot-notes">Extraction Method: Principal Component Analysis.</div>
           </div>
 
           {/* Rotated Component Matrix */}
