@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { VariableMeta, VariableType, VariableAlign, VariableMeasure, VariableRole } from '../types/spss';
-import { Trash2, Plus, ArrowUp, ArrowDown, Copy, Clipboard, Check, HelpCircle, ClipboardPaste } from 'lucide-react';
+import { Trash2, Plus, ArrowUp, ArrowDown, Copy, Clipboard, Check, ClipboardPaste } from 'lucide-react';
 import { VariableTypeModal } from './VariableTypeModal';
 import { MissingValuesModal } from './MissingValuesModal';
 import { parseClipboardMatrix, sanitizeSpssVarName } from '../utils/clipboardUtils';
@@ -15,6 +15,511 @@ interface VariableViewGridProps {
   onReorderVariables?: (fromIndex: number, toIndex: number) => void;
   onBulkAddVariables?: (newVars: VariableMeta[]) => void;
 }
+
+const formatValuesSummary = (v: VariableMeta) => {
+  const keys = Object.keys(v.values || {});
+  if (keys.length === 0) return '{None}';
+  const firstTwo = keys.slice(0, 2).map((k) => `{${k}, ${v.values[k]}}`).join('; ');
+  return keys.length > 2 ? `${firstTwo}...` : firstTwo;
+};
+
+interface VariableRowProps {
+  v: VariableMeta;
+  idx: number;
+  isSelected: boolean;
+  isDragOver: boolean;
+  variables: VariableMeta[];
+  copiedAttributes: { sourceName: string; attrs: Partial<VariableMeta> } | null;
+  registerCellRef: (key: string, el: HTMLElement | null) => void;
+  onRowHeaderClick: (idx: number, e: React.MouseEvent) => void;
+  onUpdateVariable: (index: number, updated: Partial<VariableMeta>) => void;
+  onOpenValueLabels: (varName: string) => void;
+  onDeleteVariable: (index: number) => void;
+  onCopyAttributes: (index: number) => void;
+  onPasteAttributes: (index: number) => void;
+  handleKeyDown: (e: React.KeyboardEvent, row: number, col: number) => void;
+  setSelectedRowIdx: (idx: number) => void;
+  setSelectedTypeVarIdx: (idx: number) => void;
+  setSelectedMissingVarIdx: (idx: number) => void;
+  setDraggedRowIdx: (idx: number | null) => void;
+  setDragOverRowIdx: (idx: number | null) => void;
+  onReorderVariables?: (fromIndex: number, toIndex: number) => void;
+}
+
+const VariableRow: React.FC<VariableRowProps> = ({
+  v,
+  idx,
+  isSelected,
+  isDragOver,
+  variables,
+  copiedAttributes,
+  registerCellRef,
+  onRowHeaderClick,
+  onUpdateVariable,
+  onOpenValueLabels,
+  onDeleteVariable,
+  onCopyAttributes,
+  onPasteAttributes,
+  handleKeyDown,
+  setSelectedRowIdx,
+  setSelectedTypeVarIdx,
+  setSelectedMissingVarIdx,
+  setDraggedRowIdx,
+  setDragOverRowIdx,
+  onReorderVariables,
+}) => {
+  const [localName, setLocalName] = useState(v.name);
+  const [prevName, setPrevName] = useState(v.name);
+  if (v.name !== prevName) {
+    setPrevName(v.name);
+    setLocalName(v.name);
+  }
+
+  const [localLabel, setLocalLabel] = useState(v.label);
+  const [prevLabel, setPrevLabel] = useState(v.label);
+  if (v.label !== prevLabel) {
+    setPrevLabel(v.label);
+    setLocalLabel(v.label);
+  }
+
+  const [localWidth, setLocalWidth] = useState(String(v.width));
+  const [prevWidth, setPrevWidth] = useState(v.width);
+  if (v.width !== prevWidth) {
+    setPrevWidth(v.width);
+    setLocalWidth(String(v.width));
+  }
+
+  const [localDecimals, setLocalDecimals] = useState(String(v.decimals));
+  const [prevDecimals, setPrevDecimals] = useState(v.decimals);
+  if (v.decimals !== prevDecimals) {
+    setPrevDecimals(v.decimals);
+    setLocalDecimals(String(v.decimals));
+  }
+
+  const [localColumns, setLocalColumns] = useState(String(v.columns));
+  const [prevColumns, setPrevColumns] = useState(v.columns);
+  if (v.columns !== prevColumns) {
+    setPrevColumns(v.columns);
+    setLocalColumns(String(v.columns));
+  }
+
+  const commitName = () => {
+    const trimmed = localName.trim().replace(/\s+/g, '_');
+    if (!trimmed) {
+      const fallback = `VAR${String(idx + 1).padStart(5, '0')}`;
+      setLocalName(fallback);
+      if (fallback !== v.name) {
+        onUpdateVariable(idx, { name: fallback });
+      }
+      return;
+    }
+    const otherNames = new Set(
+      variables.filter((_, i) => i !== idx).map((other) => other.name.toLowerCase())
+    );
+    let finalName = trimmed;
+    let counter = 1;
+    while (otherNames.has(finalName.toLowerCase())) {
+      finalName = `${trimmed}_${counter}`;
+      counter++;
+    }
+    setLocalName(finalName);
+    if (finalName !== v.name) {
+      onUpdateVariable(idx, { name: finalName });
+    }
+  };
+
+  const commitLabel = () => {
+    if (localLabel !== v.label) {
+      onUpdateVariable(idx, { label: localLabel });
+    }
+  };
+
+  const commitWidth = () => {
+    const parsed = parseInt(localWidth, 10);
+    const finalWidth = isNaN(parsed) || parsed < 1 ? 8 : parsed;
+    setLocalWidth(String(finalWidth));
+    if (finalWidth !== v.width) {
+      onUpdateVariable(idx, { width: finalWidth });
+    }
+  };
+
+  const commitDecimals = () => {
+    const parsed = parseInt(localDecimals, 10);
+    const finalDec = isNaN(parsed) || parsed < 0 ? 0 : Math.min(10, parsed);
+    setLocalDecimals(String(finalDec));
+    if (finalDec !== v.decimals) {
+      onUpdateVariable(idx, { decimals: finalDec });
+    }
+  };
+
+  const commitColumns = () => {
+    const parsed = parseInt(localColumns, 10);
+    const finalCols = isNaN(parsed) || parsed < 1 ? 8 : parsed;
+    setLocalColumns(String(finalCols));
+    if (finalCols !== v.columns) {
+      onUpdateVariable(idx, { columns: finalCols });
+    }
+  };
+
+  return (
+    <tr
+      style={{
+        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.12)' : undefined,
+        borderTop: isDragOver ? '2px solid var(--accent)' : undefined,
+      }}
+      onClick={(e) => onRowHeaderClick(idx, e)}
+    >
+      {/* Row Number with Drag Handle */}
+      <td
+        className="spss-grid-row-header"
+        draggable
+        onClick={(e) => {
+          e.stopPropagation();
+          onRowHeaderClick(idx, e);
+        }}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', String(idx));
+          e.dataTransfer.effectAllowed = 'move';
+          setDraggedRowIdx(idx);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDragOverRowIdx(idx);
+        }}
+        onDragLeave={() => {
+          setDragOverRowIdx(null);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+          if (!isNaN(fromIdx) && fromIdx !== idx && onReorderVariables) {
+            onReorderVariables(fromIdx, idx);
+            setSelectedRowIdx(idx);
+          }
+          setDraggedRowIdx(null);
+          setDragOverRowIdx(null);
+        }}
+        onDragEnd={() => {
+          setDraggedRowIdx(null);
+          setDragOverRowIdx(null);
+        }}
+        title="Click to select row, or drag up/down to reorder columns in Data View"
+        style={{
+          cursor: 'grab',
+          userSelect: 'none',
+          backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : undefined,
+          fontWeight: isSelected ? 700 : undefined,
+        }}
+      >
+        {idx + 1}
+      </td>
+
+      {/* 0. Name */}
+      <td className="spss-varview-td">
+        <input
+          ref={(el) => {
+            registerCellRef(`${idx}_0`, el);
+          }}
+          className="spss-varview-input"
+          value={localName}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => setLocalName(e.target.value.replace(/\s+/g, '_'))}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              commitName();
+            } else if (e.key === 'Escape') {
+              setLocalName(v.name);
+              return;
+            }
+            handleKeyDown(e, idx, 0);
+          }}
+        />
+      </td>
+
+      {/* 1. Type */}
+      <td className="spss-varview-td">
+        <button
+          ref={(el) => {
+            registerCellRef(`${idx}_1`, el);
+          }}
+          className="spss-ellipsis-btn"
+          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={() => {
+            setSelectedRowIdx(idx);
+            setSelectedTypeVarIdx(idx);
+          }}
+          onKeyDown={(e) => handleKeyDown(e, idx, 1)}
+          title="Define Variable Type"
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {v.type}
+          </span>
+          <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
+        </button>
+      </td>
+
+      {/* 2. Width */}
+      <td className="spss-varview-td">
+        <input
+          ref={(el) => {
+            registerCellRef(`${idx}_2`, el);
+          }}
+          type="number"
+          className="spss-varview-input"
+          value={localWidth}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => setLocalWidth(e.target.value)}
+          onBlur={commitWidth}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              commitWidth();
+            } else if (e.key === 'Escape') {
+              setLocalWidth(String(v.width));
+              return;
+            }
+            handleKeyDown(e, idx, 2);
+          }}
+        />
+      </td>
+
+      {/* 3. Decimals */}
+      <td className="spss-varview-td">
+        <input
+          ref={(el) => {
+            registerCellRef(`${idx}_3`, el);
+          }}
+          type="number"
+          className="spss-varview-input"
+          value={localDecimals}
+          min={0}
+          max={10}
+          disabled={v.type === 'String'}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => setLocalDecimals(e.target.value)}
+          onBlur={commitDecimals}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              commitDecimals();
+            } else if (e.key === 'Escape') {
+              setLocalDecimals(String(v.decimals));
+              return;
+            }
+            handleKeyDown(e, idx, 3);
+          }}
+        />
+      </td>
+
+      {/* 4. Label */}
+      <td className="spss-varview-td">
+        <input
+          ref={(el) => {
+            registerCellRef(`${idx}_4`, el);
+          }}
+          className="spss-varview-input"
+          placeholder="Variable label..."
+          value={localLabel}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => setLocalLabel(e.target.value)}
+          onBlur={commitLabel}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              commitLabel();
+            } else if (e.key === 'Escape') {
+              setLocalLabel(v.label);
+              return;
+            }
+            handleKeyDown(e, idx, 4);
+          }}
+        />
+      </td>
+
+      {/* 5. Values (Modal trigger) */}
+      <td className="spss-varview-td">
+        <button
+          ref={(el) => {
+            registerCellRef(`${idx}_5`, el);
+          }}
+          className="spss-ellipsis-btn"
+          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={() => {
+            setSelectedRowIdx(idx);
+            onOpenValueLabels(v.name);
+          }}
+          onKeyDown={(e) => handleKeyDown(e, idx, 5)}
+          title="Define Value Labels"
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {formatValuesSummary(v)}
+          </span>
+          <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
+        </button>
+      </td>
+
+      {/* 6. Missing */}
+      <td className="spss-varview-td">
+        <button
+          ref={(el) => {
+            registerCellRef(`${idx}_6`, el);
+          }}
+          className="spss-ellipsis-btn"
+          onFocus={() => setSelectedRowIdx(idx)}
+          onClick={() => {
+            setSelectedRowIdx(idx);
+            setSelectedMissingVarIdx(idx);
+          }}
+          onKeyDown={(e) => handleKeyDown(e, idx, 6)}
+          title="Define Missing Values"
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {v.missing || 'None'}
+          </span>
+          <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
+        </button>
+      </td>
+
+      {/* 7. Columns */}
+      <td className="spss-varview-td">
+        <input
+          ref={(el) => {
+            registerCellRef(`${idx}_7`, el);
+          }}
+          type="number"
+          className="spss-varview-input"
+          value={localColumns}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => setLocalColumns(e.target.value)}
+          onBlur={commitColumns}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              commitColumns();
+            } else if (e.key === 'Escape') {
+              setLocalColumns(String(v.columns));
+              return;
+            }
+            handleKeyDown(e, idx, 7);
+          }}
+        />
+      </td>
+
+      {/* 8. Align */}
+      <td className="spss-varview-td">
+        <select
+          ref={(el) => {
+            registerCellRef(`${idx}_8`, el);
+          }}
+          className="spss-varview-select"
+          value={v.align}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => onUpdateVariable(idx, { align: e.target.value as VariableAlign })}
+          onKeyDown={(e) => handleKeyDown(e, idx, 8)}
+        >
+          <option value="Right">Right</option>
+          <option value="Left">Left</option>
+          <option value="Center">Center</option>
+        </select>
+      </td>
+
+      {/* 9. Measure */}
+      <td className="spss-varview-td">
+        <select
+          ref={(el) => {
+            registerCellRef(`${idx}_9`, el);
+          }}
+          className="spss-varview-select"
+          value={v.measure}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => onUpdateVariable(idx, { measure: e.target.value as VariableMeasure })}
+          onKeyDown={(e) => handleKeyDown(e, idx, 9)}
+        >
+          <option value="Scale">Scale</option>
+          <option value="Ordinal">Ordinal</option>
+          <option value="Nominal">Nominal</option>
+        </select>
+      </td>
+
+      {/* 10. Role */}
+      <td className="spss-varview-td">
+        <select
+          ref={(el) => {
+            registerCellRef(`${idx}_10`, el);
+          }}
+          className="spss-varview-select"
+          value={v.role}
+          onFocus={() => setSelectedRowIdx(idx)}
+          onChange={(e) => onUpdateVariable(idx, { role: e.target.value as VariableRole })}
+          onKeyDown={(e) => handleKeyDown(e, idx, 10)}
+        >
+          <option value="Input">Input</option>
+          <option value="Target">Target</option>
+          <option value="Both">Both</option>
+          <option value="None">None</option>
+          <option value="Partition">Partition</option>
+          <option value="Split">Split</option>
+        </select>
+      </td>
+
+      {/* Actions: Move Up/Down, Copy Attrs, Delete */}
+      <td className="spss-varview-td" style={{ textAlign: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+          <button
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--text-muted)',
+              padding: 1,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCopyAttributes(idx);
+            }}
+            title={`Copy attributes of ${v.name}`}
+          >
+            <Copy size={12} />
+          </button>
+
+          {copiedAttributes && (
+            <button
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--accent)',
+                padding: 1,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPasteAttributes(idx);
+              }}
+              title={`Paste attributes from ${copiedAttributes.sourceName}`}
+            >
+              <Clipboard size={12} />
+            </button>
+          )}
+
+          <button
+            style={{
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--danger)',
+              padding: 1,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteVariable(idx);
+            }}
+            title={`Delete variable ${v.name}`}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+};
 
 export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
   variables,
@@ -56,6 +561,10 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
       }
     }
   };
+
+  const registerCellRef = useCallback((key: string, el: HTMLElement | null) => {
+    cellRefs.current[key] = el;
+  }, []);
 
   useEffect(() => {
     if (pendingFocusRef.current) {
@@ -459,13 +968,6 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
     }
   };
 
-  const formatValuesSummary = (v: VariableMeta) => {
-    const keys = Object.keys(v.values || {});
-    if (keys.length === 0) return '{None}';
-    const firstTwo = keys.slice(0, 2).map((k) => `{${k}, ${v.values[k]}}`).join('; ');
-    return keys.length > 2 ? `${firstTwo}...` : firstTwo;
-  };
-
   return (
     <div className="spss-grid-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Variable View Toolbar: Reorder, Copy/Paste Attributes, Add */}
@@ -484,7 +986,10 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
         <button
           className="spss-btn spss-btn-sm"
           style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-          onClick={onAddVariable}
+          onClick={() => {
+            pendingFocusRef.current = { row: variables.length, col: 0 };
+            onAddVariable();
+          }}
           title="Add a new variable to the dataset"
         >
           <Plus size={13} /> Add Variable
@@ -642,348 +1147,53 @@ export const VariableViewGrid: React.FC<VariableViewGridProps> = ({
             </tr>
           </thead>
           <tbody>
-            {variables.map((v, idx) => {
-              const isSelected = selectedRowIdx === idx || selectedVarRows.includes(idx);
-              const isDragOver = dragOverRowIdx === idx;
-              return (
-                <tr
-                  key={v.name || idx}
-                  style={{
-                    backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.12)' : undefined,
-                    borderTop: isDragOver ? '2px solid var(--accent)' : undefined,
-                  }}
-                  onClick={(e) => handleRowHeaderClick(idx, e)}
-                >
-                  {/* Row Number with Drag Handle */}
-                  <td
-                    className="spss-grid-row-header"
-                    draggable
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRowHeaderClick(idx, e);
-                    }}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', String(idx));
-                      e.dataTransfer.effectAllowed = 'move';
-                      setDraggedRowIdx(idx);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'move';
-                      if (dragOverRowIdx !== idx) setDragOverRowIdx(idx);
-                    }}
-                    onDragLeave={() => {
-                      if (dragOverRowIdx === idx) setDragOverRowIdx(null);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
-                      if (!isNaN(fromIdx) && fromIdx !== idx && onReorderVariables) {
-                        onReorderVariables(fromIdx, idx);
-                        setSelectedRowIdx(idx);
-                      }
-                      setDraggedRowIdx(null);
-                      setDragOverRowIdx(null);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedRowIdx(null);
-                      setDragOverRowIdx(null);
-                    }}
-                    title="Click to select row, or drag up/down to reorder columns in Data View"
-                    style={{
-                      cursor: 'grab',
-                      userSelect: 'none',
-                      backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.2)' : undefined,
-                      fontWeight: isSelected ? 700 : undefined,
-                    }}
-                  >
-                    {idx + 1}
-                  </td>
-
-                  {/* 0. Name */}
-                  <td className="spss-varview-td">
-                    <input
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_0`] = el;
-                      }}
-                      className="spss-varview-input"
-                      value={v.name}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { name: e.target.value.replace(/\s+/g, '_') })}
-                      onBlur={(e) => {
-                        const trimmed = e.target.value.trim().replace(/\s+/g, '_');
-                        if (!trimmed) {
-                          onUpdateVariable(idx, { name: `VAR${String(idx + 1).padStart(5, '0')}` });
-                          return;
-                        }
-                        const otherNames = new Set(variables.filter((_, i) => i !== idx).map((other) => other.name.toLowerCase()));
-                        let finalName = trimmed;
-                        let counter = 1;
-                        while (otherNames.has(finalName.toLowerCase())) {
-                          finalName = `${trimmed}_${counter}`;
-                          counter++;
-                        }
-                        if (finalName !== v.name) {
-                          onUpdateVariable(idx, { name: finalName });
-                        }
-                      }}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 0)}
-                    />
-                  </td>
-
-                  {/* 1. Type */}
-                  <td className="spss-varview-td">
-                    <button
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_1`] = el;
-                      }}
-                      className="spss-ellipsis-btn"
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onClick={() => {
-                        setSelectedRowIdx(idx);
-                        setSelectedTypeVarIdx(idx);
-                      }}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 1)}
-                      title="Define Variable Type"
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {v.type}
-                      </span>
-                      <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
-                    </button>
-                  </td>
-
-                  {/* 2. Width */}
-                  <td className="spss-varview-td">
-                    <input
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_2`] = el;
-                      }}
-                      type="number"
-                      className="spss-varview-input"
-                      value={v.width}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { width: parseInt(e.target.value) || 8 })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 2)}
-                    />
-                  </td>
-
-                  {/* 3. Decimals */}
-                  <td className="spss-varview-td">
-                    <input
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_3`] = el;
-                      }}
-                      type="number"
-                      className="spss-varview-input"
-                      value={v.decimals}
-                      min={0}
-                      max={10}
-                      disabled={v.type === 'String'}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { decimals: Math.max(0, parseInt(e.target.value) || 0) })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 3)}
-                    />
-                  </td>
-
-                  {/* 4. Label */}
-                  <td className="spss-varview-td">
-                    <input
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_4`] = el;
-                      }}
-                      className="spss-varview-input"
-                      placeholder="Variable label..."
-                      value={v.label}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { label: e.target.value })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 4)}
-                    />
-                  </td>
-
-                  {/* 5. Values (Modal trigger) */}
-                  <td className="spss-varview-td">
-                    <button
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_5`] = el;
-                      }}
-                      className="spss-ellipsis-btn"
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onClick={() => {
-                        setSelectedRowIdx(idx);
-                        onOpenValueLabels(v.name);
-                      }}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 5)}
-                      title="Define Value Labels"
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {formatValuesSummary(v)}
-                      </span>
-                      <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
-                    </button>
-                  </td>
-
-                  {/* 6. Missing */}
-                  <td className="spss-varview-td">
-                    <button
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_6`] = el;
-                      }}
-                      className="spss-ellipsis-btn"
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onClick={() => {
-                        setSelectedRowIdx(idx);
-                        setSelectedMissingVarIdx(idx);
-                      }}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 6)}
-                      title="Define Missing Values"
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {v.missing || 'None'}
-                      </span>
-                      <span style={{ fontWeight: 700, paddingLeft: 4 }}>...</span>
-                    </button>
-                  </td>
-
-                  {/* 7. Columns */}
-                  <td className="spss-varview-td">
-                    <input
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_7`] = el;
-                      }}
-                      type="number"
-                      className="spss-varview-input"
-                      value={v.columns}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { columns: parseInt(e.target.value) || 8 })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 7)}
-                    />
-                  </td>
-
-                  {/* 8. Align */}
-                  <td className="spss-varview-td">
-                    <select
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_8`] = el;
-                      }}
-                      className="spss-varview-select"
-                      value={v.align}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { align: e.target.value as VariableAlign })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 8)}
-                    >
-                      <option value="Right">Right</option>
-                      <option value="Left">Left</option>
-                      <option value="Center">Center</option>
-                    </select>
-                  </td>
-
-                  {/* 9. Measure */}
-                  <td className="spss-varview-td">
-                    <select
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_9`] = el;
-                      }}
-                      className="spss-varview-select"
-                      value={v.measure}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { measure: e.target.value as VariableMeasure })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 9)}
-                    >
-                      <option value="Scale">Scale</option>
-                      <option value="Ordinal">Ordinal</option>
-                      <option value="Nominal">Nominal</option>
-                    </select>
-                  </td>
-
-                  {/* 10. Role */}
-                  <td className="spss-varview-td">
-                    <select
-                      ref={(el) => {
-                        cellRefs.current[`${idx}_10`] = el;
-                      }}
-                      className="spss-varview-select"
-                      value={v.role}
-                      onFocus={() => setSelectedRowIdx(idx)}
-                      onChange={(e) => onUpdateVariable(idx, { role: e.target.value as VariableRole })}
-                      onKeyDown={(e) => handleKeyDown(e, idx, 10)}
-                    >
-                      <option value="Input">Input</option>
-                      <option value="Target">Target</option>
-                      <option value="Both">Both</option>
-                      <option value="None">None</option>
-                      <option value="Partition">Partition</option>
-                      <option value="Split">Split</option>
-                    </select>
-                  </td>
-
-                  {/* Actions: Move Up/Down, Copy Attrs, Delete */}
-                  <td className="spss-varview-td" style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-                      <button
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: 'var(--text-muted)',
-                          padding: 1,
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleCopyAttributes(idx);
-                        }}
-                        title={`Copy attributes of ${v.name}`}
-                      >
-                        <Copy size={12} />
-                      </button>
-
-                      {copiedAttributes && (
-                        <button
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                            color: 'var(--accent)',
-                            padding: 1,
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePasteAttributes(idx);
-                          }}
-                          title={`Paste attributes from ${copiedAttributes.sourceName}`}
-                        >
-                          <Clipboard size={12} />
-                        </button>
-                      )}
-
-                      <button
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: 'var(--danger)',
-                          padding: 1,
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteVariable(idx);
-                        }}
-                        title={`Delete variable ${v.name}`}
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+            {variables.map((v, idx) => (
+              <VariableRow
+                key={idx}
+                v={v}
+                idx={idx}
+                isSelected={selectedRowIdx === idx || selectedVarRows.includes(idx)}
+                isDragOver={dragOverRowIdx === idx}
+                variables={variables}
+                copiedAttributes={copiedAttributes}
+                registerCellRef={registerCellRef}
+                onRowHeaderClick={handleRowHeaderClick}
+                onUpdateVariable={onUpdateVariable}
+                onOpenValueLabels={onOpenValueLabels}
+                onDeleteVariable={onDeleteVariable}
+                onCopyAttributes={handleCopyAttributes}
+                onPasteAttributes={handlePasteAttributes}
+                handleKeyDown={handleKeyDown}
+                setSelectedRowIdx={setSelectedRowIdx}
+                setSelectedTypeVarIdx={setSelectedTypeVarIdx}
+                setSelectedMissingVarIdx={setSelectedMissingVarIdx}
+                setDraggedRowIdx={setDraggedRowIdx}
+                setDragOverRowIdx={setDragOverRowIdx}
+                onReorderVariables={onReorderVariables}
+              />
+            ))}
 
             {/* Add Variable row */}
             <tr>
-              <td className="spss-grid-row-header" style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={onAddVariable}>
+              <td
+                className="spss-grid-row-header"
+                style={{ color: 'var(--accent)', cursor: 'pointer' }}
+                onClick={() => {
+                  pendingFocusRef.current = { row: variables.length, col: 0 };
+                  onAddVariable();
+                }}
+              >
                 *
               </td>
-              <td colSpan={12} className="spss-varview-td" style={{ cursor: 'pointer', color: 'var(--accent)' }} onClick={onAddVariable}>
+              <td
+                colSpan={12}
+                className="spss-varview-td"
+                style={{ cursor: 'pointer', color: 'var(--accent)' }}
+                onClick={() => {
+                  pendingFocusRef.current = { row: variables.length, col: 0 };
+                  onAddVariable();
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Plus size={14} /> Add new variable...
                 </div>
