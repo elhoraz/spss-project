@@ -18,6 +18,12 @@ import {
   computeLeveneTest,
   studentizedRangePValue,
   studentizedRangeCritical,
+  computeFisherExact2x2,
+  computeLinearByLinearAssociation,
+  computeSymmetricMeasures,
+  computeRiskEstimates,
+  computeSpearmanCorrelation,
+  computeKendallTauB,
 } from './statsMath';
 import { isMissingValue, isUserMissingValue, isSystemMissingValue } from './missingUtils';
 
@@ -284,21 +290,36 @@ export function clientComputeFrequencies(
   };
 }
 
+export interface CrosstabsOptions {
+  chiSquare?: boolean;
+  phiCramer?: boolean;
+  contingencyCoeff?: boolean;
+  riskEstimate?: boolean;
+  observed?: boolean;
+  expected?: boolean;
+  rowPct?: boolean;
+  colPct?: boolean;
+  totalPct?: boolean;
+}
+
 // 3. CROSSTABS
 export function clientComputeCrosstabs(
   rows: Record<string, any>[],
   rowVar: string,
   colVar: string,
-  weightVar?: string | null
+  weightVar?: string | null,
+  options?: CrosstabsOptions,
+  variablesMeta?: VariableMeta[]
 ): OutputItem {
+  const rowMeta = variablesMeta?.find((v) => v.name === rowVar);
+  const colMeta = variablesMeta?.find((v) => v.name === colVar);
+
   const validRows = rows.filter(
     (r) =>
-      r[rowVar] !== undefined &&
-      r[rowVar] !== null &&
+      !isMissingValue(r[rowVar], rowMeta) &&
+      !isMissingValue(r[colVar], colMeta) &&
       String(r[rowVar]).trim() !== '' &&
       String(r[rowVar]).trim() !== '.' &&
-      r[colVar] !== undefined &&
-      r[colVar] !== null &&
       String(r[colVar]).trim() !== '' &&
       String(r[colVar]).trim() !== '.'
   );
@@ -322,6 +343,10 @@ export function clientComputeCrosstabs(
   const grandTotal = rowTotals.reduce((a, b) => a + b, 0);
 
   let chiSq = 0;
+  let cellsUnder5 = 0;
+  let minExpected = Infinity;
+  const totalCells = rowSet.length * colSet.length;
+
   const cells = rowSet.map((_, rIdx) => {
     return colSet.map((_, cIdx) => {
       const count = countMatrix[rIdx][cIdx];
@@ -329,6 +354,9 @@ export function clientComputeCrosstabs(
       const rowPct = rowTotals[rIdx] > 0 ? (count / rowTotals[rIdx]) * 100 : 0;
       const colPct = colTotals[cIdx] > 0 ? (count / colTotals[cIdx]) * 100 : 0;
       const totalPct = grandTotal > 0 ? (count / grandTotal) * 100 : 0;
+
+      if (expected < 5) cellsUnder5++;
+      if (expected < minExpected) minExpected = expected;
 
       if (expected > 0) {
         chiSq += Math.pow(count - expected, 2) / expected;
@@ -343,6 +371,8 @@ export function clientComputeCrosstabs(
       };
     });
   });
+
+  if (!isFinite(minExpected)) minExpected = 0;
 
   const df = (rowSet.length - 1) * (colSet.length - 1);
   const pVal = chiSquarePValue(chiSq, df);
@@ -388,6 +418,17 @@ export function clientComputeCrosstabs(
       df: 1,
       asymp_sig_2_sided: Number(yatesSig.toFixed(4)),
     });
+
+    // Exact Fisher's Exact Test
+    const fisher = computeFisherExact2x2(a, b, c, d);
+    chiTests.push({
+      test: "Fisher's Exact Test",
+      value: null,
+      df: null,
+      asymp_sig_2_sided: null,
+      exact_sig_2_sided: fisher.pTwoSided,
+      exact_sig_1_sided: fisher.pOneSided,
+    });
   }
 
   chiTests.push({
@@ -397,6 +438,15 @@ export function clientComputeCrosstabs(
     asymp_sig_2_sided: Number(lrSig.toFixed(4)),
   });
 
+  // Linear-by-Linear Association
+  const lbl = computeLinearByLinearAssociation(countMatrix, rowTotals, colTotals, grandTotal);
+  chiTests.push({
+    test: 'Linear-by-Linear Association',
+    value: lbl.value,
+    df: lbl.df,
+    asymp_sig_2_sided: lbl.sig,
+  });
+
   chiTests.push({
     test: 'N of Valid Cases',
     value: grandTotal,
@@ -404,22 +454,77 @@ export function clientComputeCrosstabs(
     asymp_sig_2_sided: null,
   });
 
+  // Symmetric Measures
+  const sym = computeSymmetricMeasures(chiSq, grandTotal, rowSet.length, colSet.length, pVal);
+  const symmetricMeasures = [
+    { measure: 'Phi', value: sym.phi, approx_sig: sym.approxSig },
+    { measure: "Cramer's V", value: sym.cramersV, approx_sig: sym.approxSig },
+    { measure: 'Contingency Coefficient', value: sym.contingencyCoeff, approx_sig: sym.approxSig },
+  ];
+
+  // Risk Estimates (for 2x2)
+  let riskEstimates: any[] = [];
+  if (rowSet.length === 2 && colSet.length === 2 && grandTotal > 0) {
+    riskEstimates = computeRiskEstimates(
+      countMatrix[0][0],
+      countMatrix[0][1],
+      countMatrix[1][0],
+      countMatrix[1][1],
+      rowSet[0],
+      rowSet[1],
+      colSet[0],
+      colSet[1]
+    );
+  }
+
+  const effectiveOptions: CrosstabsOptions = {
+    observed: options?.observed !== undefined ? options.observed : true,
+    expected: options?.expected !== undefined ? options.expected : false,
+    rowPct: options?.rowPct !== undefined ? options.rowPct : false,
+    colPct: options?.colPct !== undefined ? options.colPct : false,
+    totalPct: options?.totalPct !== undefined ? options.totalPct : false,
+    chiSquare: options?.chiSquare !== undefined ? options.chiSquare : true,
+    phiCramer: options?.phiCramer !== undefined ? options.phiCramer : false,
+    contingencyCoeff: options?.contingencyCoeff !== undefined ? options.contingencyCoeff : false,
+    riskEstimate: options?.riskEstimate !== undefined ? options.riskEstimate : false,
+  };
+
+  const pctUnder5 = totalCells > 0 ? ((cellsUnder5 / totalCells) * 100).toFixed(1) : '0.0';
+  const minExpStr = minExpected.toFixed(2);
+  const warningFootnote = `a. ${cellsUnder5} cells (${pctUnder5}%) have expected count less than 5. The minimum expected count is ${minExpStr}.`;
+
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
     title: `${rowVar} * ${colVar} Crosstabulation`,
     type: 'crosstabs',
-    syntax: `CROSSTABS\n  /TABLES=${rowVar} BY ${colVar}\n  /STATISTICS=CHISQ\n  /CELLS=COUNT EXPECTED ROW COLUMN TOTAL.`,
+    syntax: `CROSSTABS\n  /TABLES=${rowVar} BY ${colVar}\n  /STATISTICS=${[
+      effectiveOptions.chiSquare ? 'CHISQ' : '',
+      effectiveOptions.phiCramer ? 'PHI' : '',
+      effectiveOptions.contingencyCoeff ? 'CC' : '',
+      effectiveOptions.riskEstimate ? 'RISK' : '',
+    ].filter(Boolean).join(' ')}\n  /CELLS=${[
+      effectiveOptions.observed ? 'COUNT' : '',
+      effectiveOptions.expected ? 'EXPECTED' : '',
+      effectiveOptions.rowPct ? 'ROW' : '',
+      effectiveOptions.colPct ? 'COLUMN' : '',
+      effectiveOptions.totalPct ? 'TOTAL' : '',
+    ].filter(Boolean).join(' ')}.`,
     data: {
       title: `${rowVar} * ${colVar} Crosstabulation`,
       row_var: rowVar,
       col_var: colVar,
+      options: effectiveOptions,
       case_summary: {
+        valid: grandTotal,
         valid_n: grandTotal,
         valid_percent: rows.length > 0 ? Number(((grandTotal / rows.length) * 100).toFixed(1)) : 0,
+        missing: rows.length - grandTotal,
         missing_n: rows.length - grandTotal,
         missing_percent: rows.length > 0 ? Number((((rows.length - grandTotal) / rows.length) * 100).toFixed(1)) : 0,
+        total: rows.length,
         total_n: rows.length,
+        total_percent: 100.0,
       },
       row_categories: rowSet,
       col_categories: colSet,
@@ -427,129 +532,242 @@ export function clientComputeCrosstabs(
       row_totals: rowTotals,
       col_totals: colTotals,
       grand_total: grandTotal,
-      chi_square_tests: chiTests,
+      chi_square_tests: effectiveOptions.chiSquare ? chiTests : null,
+      chi_square_footnote: warningFootnote,
+      symmetric_measures: (effectiveOptions.phiCramer || effectiveOptions.contingencyCoeff) ? symmetricMeasures : null,
+      risk_estimates: effectiveOptions.riskEstimate && riskEstimates.length > 0 ? riskEstimates : null,
     },
   };
+}
+
+export interface CorrelationOptions {
+  pearson?: boolean;
+  spearman?: boolean;
+  kendall?: boolean;
+  twoTailed?: boolean;
+  flagSignificant?: boolean;
 }
 
 // 4. CORRELATIONS
 export function clientComputeCorrelations(
   rows: Record<string, any>[],
   variables: string[],
-  variablesMeta?: VariableMeta[]
+  variablesMeta?: VariableMeta[],
+  options?: CorrelationOptions
 ): OutputItem {
+  const opt: Required<CorrelationOptions> = {
+    pearson: options?.pearson ?? true,
+    spearman: options?.spearman ?? false,
+    kendall: options?.kendall ?? false,
+    twoTailed: options?.twoTailed ?? true,
+    flagSignificant: options?.flagSignificant ?? true,
+  };
+
+  // If none selected, default to Pearson
+  if (!opt.pearson && !opt.spearman && !opt.kendall) {
+    opt.pearson = true;
+  }
+
   let hasConstantVar = false;
 
-  const matrix = variables.map((v1) => {
+  // Helper to extract valid pairs for two variables
+  const getPairs = (v1: string, v2: string): [number, number][] => {
     const meta1 = variablesMeta?.find((v) => v.name === v1);
-    const correlations = variables.map((v2) => {
-      const meta2 = variablesMeta?.find((v) => v.name === v2);
+    const meta2 = variablesMeta?.find((v) => v.name === v2);
+    return rows
+      .map((r) => {
+        const raw1 = r[v1];
+        const raw2 = r[v2];
+        if (isMissingValue(raw1, meta1) || isMissingValue(raw2, meta2)) {
+          return null;
+        }
+        const a = parseFloat(raw1);
+        const b = parseFloat(raw2);
+        return [a, b];
+      })
+      .filter((p): p is [number, number] => p !== null && !isNaN(p[0]) && !isNaN(p[1]) && isFinite(p[0]) && isFinite(p[1]));
+  };
 
-      const validPairs = rows
-        .map((r) => {
-          const raw1 = r[v1];
-          const raw2 = r[v2];
-          if (isMissingValue(raw1, meta1) || isMissingValue(raw2, meta2)) {
-            return null;
+  // 1. Pearson Correlation Matrix
+  const pearsonMatrix = opt.pearson
+    ? variables.map((v1) => {
+        const correlations = variables.map((v2) => {
+          const validPairs = getPairs(v1, v2);
+          const n = validPairs.length;
+
+          if (v1 === v2) {
+            if (n < 2) {
+              return { var1: v1, var2: v2, coefficient: null, sig: null, sig_2_tailed: null, n, flag: '', is_constant: false };
+            }
+            const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
+            const den1 = validPairs.reduce((acc, p) => acc + Math.pow(p[0] - mean1, 2), 0);
+            if (den1 === 0) {
+              hasConstantVar = true;
+              return { var1: v1, var2: v2, coefficient: null, sig: null, sig_2_tailed: null, n, flag: '', is_constant: true };
+            }
+            return { var1: v1, var2: v2, coefficient: 1.0, sig: null, sig_2_tailed: null, n, flag: '', is_constant: false };
           }
-          const a = parseFloat(raw1);
-          const b = parseFloat(raw2);
-          return [a, b];
-        })
-        .filter((p): p is [number, number] => p !== null && !isNaN(p[0]) && !isNaN(p[1]) && isFinite(p[0]) && isFinite(p[1]));
 
-      const n = validPairs.length;
+          if (n < 2) {
+            return { var1: v1, var2: v2, coefficient: null, sig: null, sig_2_tailed: null, n, flag: '', is_constant: false };
+          }
 
-      // Diagonal (v1 === v2)
-      if (v1 === v2) {
-        if (n < 2) {
-          return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: false };
-        }
-        const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
-        const den1 = validPairs.reduce((acc, p) => acc + Math.pow(p[0] - mean1, 2), 0);
-        if (den1 === 0) {
-          hasConstantVar = true;
-          return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: true };
-        }
-        return { var1: v1, var2: v2, coefficient: 1.0, sig_2_tailed: null, n, flag: '', is_constant: false };
-      }
+          const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
+          const mean2 = validPairs.reduce((acc, p) => acc + p[1], 0) / n;
 
-      // Off-diagonal (v1 !== v2)
-      if (n < 2) {
-        return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: false };
-      }
+          let num = 0;
+          let den1 = 0;
+          let den2 = 0;
+          validPairs.forEach(([x, y]) => {
+            const dx = x - mean1;
+            const dy = y - mean2;
+            num += dx * dy;
+            den1 += dx * dx;
+            den2 += dy * dy;
+          });
 
-      const mean1 = validPairs.reduce((acc, p) => acc + p[0], 0) / n;
-      const mean2 = validPairs.reduce((acc, p) => acc + p[1], 0) / n;
+          if (den1 === 0 || den2 === 0) {
+            hasConstantVar = true;
+            return { var1: v1, var2: v2, coefficient: null, sig: null, sig_2_tailed: null, n, flag: '', is_constant: true };
+          }
 
-      let num = 0;
-      let den1 = 0;
-      let den2 = 0;
+          let r = num / Math.sqrt(den1 * den2);
+          r = Math.max(-1.0, Math.min(1.0, r));
 
-      validPairs.forEach(([x, y]) => {
-        const dx = x - mean1;
-        const dy = y - mean2;
-        num += dx * dy;
-        den1 += dx * dx;
-        den2 += dy * dy;
-      });
+          let pVal: number | null = null;
+          let flag = '';
 
-      if (den1 === 0 || den2 === 0) {
-        hasConstantVar = true;
-        return { var1: v1, var2: v2, coefficient: null, sig_2_tailed: null, n, flag: '', is_constant: true };
-      }
+          if (n >= 3) {
+            if (Math.abs(r) >= 1.0 - 1e-12) {
+              pVal = 0.0;
+              if (opt.flagSignificant) flag = '**';
+            } else {
+              const tStat = (r * Math.sqrt(n - 2)) / Math.sqrt(1 - r * r);
+              const twoP = studentTPValue(tStat, n - 2);
+              pVal = opt.twoTailed ? twoP : twoP / 2;
+              if (opt.flagSignificant) {
+                if (pVal < 0.01) flag = '**';
+                else if (pVal < 0.05) flag = '*';
+              }
+            }
+          }
 
-      let r = num / Math.sqrt(den1 * den2);
-      r = Math.max(-1.0, Math.min(1.0, r));
+          return {
+            var1: v1,
+            var2: v2,
+            coefficient: Number(r.toFixed(3)),
+            sig: pVal !== null ? Number(pVal.toFixed(4)) : null,
+            sig_2_tailed: pVal !== null ? Number(pVal.toFixed(4)) : null,
+            n,
+            flag,
+            is_constant: false,
+          };
+        });
 
-      let pVal: number | null = null;
-      let flag = '';
+        return { variable: v1, correlations };
+      })
+    : undefined;
 
-      if (n >= 3) {
-        if (Math.abs(r) >= 1.0 - 1e-12) {
-          pVal = 0.0;
-          flag = '**';
-        } else {
-          const tStat = (r * Math.sqrt(n - 2)) / Math.sqrt(1 - r * r);
-          pVal = studentTPValue(tStat, n - 2);
-          if (pVal < 0.01) flag = '**';
-          else if (pVal < 0.05) flag = '*';
-        }
-      }
+  // 2. Spearman Correlation Matrix
+  const spearmanMatrix = opt.spearman
+    ? variables.map((v1) => {
+        const correlations = variables.map((v2) => {
+          if (v1 === v2) {
+            const validPairs = getPairs(v1, v2);
+            return { var1: v1, var2: v2, coefficient: 1.0, sig: null, n: validPairs.length, flag: '', is_constant: false };
+          }
+          const validPairs = getPairs(v1, v2);
+          const res = computeSpearmanCorrelation(validPairs, opt.twoTailed);
+          let flag = '';
+          if (res.is_constant) hasConstantVar = true;
+          if (opt.flagSignificant && res.sig !== null) {
+            if (res.sig < 0.01) flag = '**';
+            else if (res.sig < 0.05) flag = '*';
+          }
+          return {
+            var1: v1,
+            var2: v2,
+            coefficient: res.coefficient,
+            sig: res.sig,
+            sig_2_tailed: res.sig,
+            n: res.n,
+            flag,
+            is_constant: res.is_constant,
+          };
+        });
+        return { variable: v1, correlations };
+      })
+    : undefined;
 
-      return {
-        var1: v1,
-        var2: v2,
-        coefficient: Number(r.toFixed(3)),
-        sig_2_tailed: pVal !== null ? Number(pVal.toFixed(4)) : null,
-        n,
-        flag,
-        is_constant: false,
-      };
-    });
+  // 3. Kendall's tau-b Correlation Matrix
+  const kendallMatrix = opt.kendall
+    ? variables.map((v1) => {
+        const correlations = variables.map((v2) => {
+          if (v1 === v2) {
+            const validPairs = getPairs(v1, v2);
+            return { var1: v1, var2: v2, coefficient: 1.0, sig: null, n: validPairs.length, flag: '', is_constant: false };
+          }
+          const validPairs = getPairs(v1, v2);
+          const res = computeKendallTauB(validPairs, opt.twoTailed);
+          let flag = '';
+          if (res.is_constant) hasConstantVar = true;
+          if (opt.flagSignificant && res.sig !== null) {
+            if (res.sig < 0.01) flag = '**';
+            else if (res.sig < 0.05) flag = '*';
+          }
+          return {
+            var1: v1,
+            var2: v2,
+            coefficient: res.coefficient,
+            sig: res.sig,
+            sig_2_tailed: res.sig,
+            n: res.n,
+            flag,
+            is_constant: res.is_constant,
+          };
+        });
+        return { variable: v1, correlations };
+      })
+    : undefined;
 
-    return { variable: v1, correlations };
-  });
-
-  const notes = [
-    '** Correlation is significant at the 0.01 level (2-tailed).',
-    '* Correlation is significant at the 0.05 level (2-tailed).',
-  ];
+  const tailLabel = opt.twoTailed ? '2-tailed' : '1-tailed';
+  const notes: string[] = [];
+  if (opt.flagSignificant) {
+    notes.push(`** Correlation is significant at the 0.01 level (${tailLabel}).`);
+    notes.push(`* Correlation is significant at the 0.05 level (${tailLabel}).`);
+  }
   if (hasConstantVar) {
     notes.push('c. Cannot be computed because at least one of the variables is constant.');
+  }
+
+  const printTail = opt.twoTailed ? 'TWOTAIL' : 'ONETAIL';
+  const printSig = opt.flagSignificant ? 'SIG' : 'NOSIG';
+  const syntaxParts: string[] = [];
+  if (opt.pearson) {
+    syntaxParts.push(`CORRELATIONS\n  /VARIABLES=${variables.join(' ')}\n  /PRINT=${printTail} ${printSig}\n  /MISSING=PAIRWISE.`);
+  }
+  if (opt.spearman || opt.kendall) {
+    const nonparMethods: string[] = [];
+    if (opt.spearman) nonparMethods.push('SPEARMAN');
+    if (opt.kendall) nonparMethods.push('KENDALL');
+    syntaxParts.push(`NONPAR CORR\n  /VARIABLES=${variables.join(' ')}\n  /PRINT=${nonparMethods.join(' ')} ${printTail} ${printSig}\n  /MISSING=PAIRWISE.`);
   }
 
   return {
     id: `out_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     timestamp: new Date().toLocaleTimeString(),
-    title: 'Correlations',
+    title: opt.pearson && !opt.spearman && !opt.kendall ? 'Correlations' : 'Correlations (Parametric & Nonparametric)',
     type: 'correlations',
-    syntax: `CORRELATIONS\n  /VARIABLES=${variables.join(' ')}\n  /PRINT=TWOTAIL NOSIG\n  /MISSING=PAIRWISE.`,
+    syntax: syntaxParts.join('\n\n'),
     data: {
       title: 'Correlations',
       method_label: 'Pearson Correlation',
       variables,
-      matrix,
+      options: opt,
+      matrix: pearsonMatrix || (spearmanMatrix ? spearmanMatrix : kendallMatrix), // backward compatibility
+      pearson_matrix: pearsonMatrix,
+      spearman_matrix: spearmanMatrix,
+      kendall_matrix: kendallMatrix,
       notes,
     },
   };

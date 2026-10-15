@@ -274,12 +274,23 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
 
   const [crosstabsOptions, setCrosstabsOptions] = useState({
     chiSquare: true,
+    linearByLinear: true,
+    contingencyCoeff: false,
     phiCramer: false,
+    riskEstimate: false,
     observed: true,
     expected: false,
     rowPct: false,
     colPct: false,
     totalPct: false,
+  });
+
+  const [correlationsOptions, setCorrelationsOptions] = useState({
+    pearson: true,
+    spearman: false,
+    kendall: false,
+    twoTailed: true,
+    flagSignificant: true,
   });
 
   const [postHocOptions, setPostHocOptions] = useState({
@@ -381,12 +392,12 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
       const c = colVar || targetVars[1];
       if (!r || !c) throw new Error('Please select both a Row variable and a Column variable for Crosstabs.');
       output = await statsApiService.runCrosstabs(currentRows, r, c);
-      if (!output) output = clientComputeCrosstabs(currentRows, r, c, weightByVariable);
+      if (!output) output = clientComputeCrosstabs(currentRows, r, c, weightByVariable, crosstabsOptions, variables);
     } else if (modalType === 'correlations') {
       const vars = targetVars.length >= 2 ? targetVars : variables.filter((v) => v.type === 'Numeric' || v.measure === 'Scale').map((v) => v.name).slice(0, 3);
       if (vars.length < 2) throw new Error('Please select at least two numeric variables for Bivariate Correlations.');
       output = await statsApiService.runCorrelations(currentRows, vars);
-      if (!output) output = clientComputeCorrelations(currentRows, vars, variables);
+      if (!output) output = clientComputeCorrelations(currentRows, vars, variables, correlationsOptions);
     } else if (modalType === 'one_sample_t_test') {
       const vars = targetVars.length > 0 ? targetVars : [];
       if (vars.length === 0) throw new Error('Please select at least one Test Variable for One-Sample T-Test.');
@@ -851,9 +862,34 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     } else if (modalType === 'descriptives') {
       syntax = `DESCRIPTIVES VARIABLES=${targetVars.join(' ')}\n  /STATISTICS=MEAN STDDEV MIN MAX.`;
     } else if (modalType === 'crosstabs') {
-      syntax = `CROSSTABS\n  /TABLES=${rowVar || 'gender'} BY ${colVar || 'jobcat'}\n  /STATISTICS=CHISQ\n  /CELLS=COUNT EXPECTED ROW COLUMN TOTAL.`;
+      const statsList: string[] = [];
+      if (crosstabsOptions.chiSquare) statsList.push('CHISQ');
+      if (crosstabsOptions.phiCramer) statsList.push('PHI');
+      if (crosstabsOptions.contingencyCoeff) statsList.push('CC');
+      if (crosstabsOptions.riskEstimate) statsList.push('RISK');
+      const cellsList: string[] = [];
+      if (crosstabsOptions.observed) cellsList.push('COUNT');
+      if (crosstabsOptions.expected) cellsList.push('EXPECTED');
+      if (crosstabsOptions.rowPct) cellsList.push('ROW');
+      if (crosstabsOptions.colPct) cellsList.push('COLUMN');
+      if (crosstabsOptions.totalPct) cellsList.push('TOTAL');
+      const statsClause = statsList.length > 0 ? `\n  /STATISTICS=${statsList.join(' ')}` : '';
+      const cellsClause = cellsList.length > 0 ? `\n  /CELLS=${cellsList.join(' ')}` : '\n  /CELLS=COUNT';
+      syntax = `CROSSTABS\n  /TABLES=${rowVar || 'gender'} BY ${colVar || 'jobcat'}${statsClause}${cellsClause}.`;
     } else if (modalType === 'correlations') {
-      syntax = `CORRELATIONS\n  /VARIABLES=${targetVars.join(' ')}\n  /PRINT=TWOTAIL NOSIG.`;
+      const tailStr = correlationsOptions.twoTailed ? 'TWOTAIL' : 'ONETAIL';
+      const sigStr = correlationsOptions.flagSignificant ? 'SIG' : 'NOSIG';
+      const parts: string[] = [];
+      if (correlationsOptions.pearson) {
+        parts.push(`CORRELATIONS\n  /VARIABLES=${targetVars.join(' ')}\n  /PRINT=${tailStr} ${sigStr}\n  /MISSING=PAIRWISE.`);
+      }
+      if (correlationsOptions.spearman || correlationsOptions.kendall) {
+        const methods: string[] = [];
+        if (correlationsOptions.spearman) methods.push('SPEARMAN');
+        if (correlationsOptions.kendall) methods.push('KENDALL');
+        parts.push(`NONPAR CORR\n  /VARIABLES=${targetVars.join(' ')}\n  /PRINT=${methods.join(' ')} ${tailStr} ${sigStr}\n  /MISSING=PAIRWISE.`);
+      }
+      syntax = parts.join('\n\n');
     } else if (modalType === 'one_sample_t_test') {
       syntax = `T-TEST\n  /TESTVAL=${testValue}\n  /VARIABLES=${targetVars.join(' ')}.`;
     } else if (modalType === 'independent_t_test') {
@@ -2675,6 +2711,11 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                 <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('plots')}>Plots...</button>
               </div>
             )}
+            {modalType === 'correlations' && (
+              <div className="spss-subdialog-btn-group">
+                <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('options')}>Options...</button>
+              </div>
+            )}
             {modalType === 'crosstabs' && (
               <div className="spss-subdialog-btn-group">
                 <button type="button" className="spss-subdialog-btn" onClick={() => setActiveSubDialog('statistics')}>Statistics...</button>
@@ -2733,9 +2774,65 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
 
             <div className="spss-subdialog-body">
               {activeSubDialog === 'statistics' && (
-                <div>
-                  <fieldset className="spss-subdialog-fieldset">
-                    <legend className="spss-subdialog-legend">Central Tendency</legend>
+                modalType === 'crosstabs' ? (
+                  <div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Chi-Square & Association</legend>
+                      <div className="spss-subdialog-checkbox-grid">
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={crosstabsOptions.chiSquare}
+                            onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, chiSquare: e.target.checked })}
+                          /> Chi-square
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={crosstabsOptions.linearByLinear}
+                            onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, linearByLinear: e.target.checked })}
+                          /> Linear-by-Linear association
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Nominal</legend>
+                      <div className="spss-subdialog-checkbox-grid">
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={crosstabsOptions.contingencyCoeff}
+                            onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, contingencyCoeff: e.target.checked })}
+                          /> Contingency coefficient
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={crosstabsOptions.phiCramer}
+                            onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, phiCramer: e.target.checked })}
+                          /> Phi and Cramér's V
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Risk</legend>
+                      <div className="spss-subdialog-checkbox-grid">
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={crosstabsOptions.riskEstimate}
+                            onChange={(e) => setCrosstabsOptions({ ...crosstabsOptions, riskEstimate: e.target.checked })}
+                          /> Risk (Odds Ratio / Relative Risk for 2x2)
+                        </label>
+                      </div>
+                    </fieldset>
+                  </div>
+                ) : (
+                  <div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Central Tendency</legend>
                     <div className="spss-subdialog-checkbox-grid">
                       <label className="spss-checkbox-label">
                         <input
@@ -2835,7 +2932,7 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
                     </div>
                   </fieldset>
                 </div>
-              )}
+              ))}
 
               {activeSubDialog === 'charts' && (
                 <div>
@@ -2893,7 +2990,71 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
               )}
 
               {activeSubDialog === 'options' && (
-                modalType === 'logistic_regression' ? (
+                modalType === 'correlations' ? (
+                  <div>
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Correlation Coefficients</legend>
+                      <div className="spss-subdialog-checkbox-grid">
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={correlationsOptions.pearson}
+                            onChange={(e) => setCorrelationsOptions({ ...correlationsOptions, pearson: e.target.checked })}
+                          /> Pearson
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={correlationsOptions.kendall}
+                            onChange={(e) => setCorrelationsOptions({ ...correlationsOptions, kendall: e.target.checked })}
+                          /> Kendall's tau-b
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={correlationsOptions.spearman}
+                            onChange={(e) => setCorrelationsOptions({ ...correlationsOptions, spearman: e.target.checked })}
+                          /> Spearman
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Test of Significance</legend>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="radio"
+                            name="corrSignificance"
+                            checked={correlationsOptions.twoTailed}
+                            onChange={() => setCorrelationsOptions({ ...correlationsOptions, twoTailed: true })}
+                          /> Two-tailed
+                        </label>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="radio"
+                            name="corrSignificance"
+                            checked={!correlationsOptions.twoTailed}
+                            onChange={() => setCorrelationsOptions({ ...correlationsOptions, twoTailed: false })}
+                          /> One-tailed
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="spss-subdialog-fieldset">
+                      <legend className="spss-subdialog-legend">Display</legend>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                        <label className="spss-checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={correlationsOptions.flagSignificant}
+                            onChange={(e) => setCorrelationsOptions({ ...correlationsOptions, flagSignificant: e.target.checked })}
+                          /> Flag significant correlations
+                        </label>
+                      </div>
+                    </fieldset>
+                  </div>
+                ) : modalType === 'logistic_regression' ? (
                   <div>
                     <fieldset className="spss-subdialog-fieldset">
                       <legend className="spss-subdialog-legend">Logistic Regression Options</legend>

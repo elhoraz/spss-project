@@ -1465,3 +1465,423 @@ export function studentizedRangeCritical(k: number, df: number, alpha: number = 
 
   return (low + high) / 2;
 }
+
+/**
+ * Fisher's Exact Test for 2x2 contingency table:
+ *   [ [a, b],
+ *     [c, d] ]
+ * Computes exact two-sided and one-sided p-values and point odds ratio matching IBM SPSS Statistics.
+ */
+export function computeFisherExact2x2(
+  a: number,
+  b: number,
+  c: number,
+  d: number
+): {
+  oddsRatio: number;
+  pTwoSided: number;
+  pOneSided: number;
+  twoSided: number;
+  oneSided: number;
+} {
+  const r1 = a + b;
+  const r2 = c + d;
+  const c1 = a + c;
+  const c2 = b + d;
+  const N = r1 + r2;
+
+  if (N === 0) {
+    return { oddsRatio: 1.0, pTwoSided: 1.0, pOneSided: 1.0, twoSided: 1.0, oneSided: 1.0 };
+  }
+
+  // Odds ratio (with 0.5 Haldane-Anscombe correction if any cell is zero)
+  const orNumerator = a === 0 || b === 0 || c === 0 || d === 0 ? (a + 0.5) * (d + 0.5) : a * d;
+  const orDenominator = a === 0 || b === 0 || c === 0 || d === 0 ? (b + 0.5) * (c + 0.5) : b * c;
+  const oddsRatio = orDenominator > 0 ? orNumerator / orDenominator : 0;
+
+  // Hypergeometric log-probability helper: ln P(A = x)
+  const logFact = (n: number) => logGamma(n + 1);
+  const logHypergeom = (x: number): number => {
+    const y = c1 - x;
+    const r1_x = r1 - x;
+    const r2_y = r2 - y;
+    if (x < 0 || y < 0 || r1_x < 0 || r2_y < 0) return -Infinity;
+    return (
+      logFact(r1) +
+      logFact(r2) +
+      logFact(c1) +
+      logFact(c2) -
+      logFact(N) -
+      logFact(x) -
+      logFact(r1_x) -
+      logFact(y) -
+      logFact(r2_y)
+    );
+  };
+
+  const xMin = Math.max(0, c1 - r2);
+  const xMax = Math.min(r1, c1);
+  const observedLogP = logHypergeom(a);
+  const observedP = Math.exp(observedLogP);
+
+  const expectedA = (r1 * c1) / N;
+  let pTwoSided = 0.0;
+  let pOneSided = 0.0;
+
+  for (let x = xMin; x <= xMax; x++) {
+    const logP = logHypergeom(x);
+    const p = Math.exp(logP);
+    // Two-sided: sum probabilities <= observed probability (Fisher-Irwin definition with 1e-10 tolerance)
+    if (p <= observedP * (1.0 + 1e-10) || Math.abs(p - observedP) < 1e-12) {
+      pTwoSided += p;
+    }
+    // One-sided: direction dependent on whether observed a is >= expectedA or < expectedA
+    if (a >= expectedA) {
+      if (x >= a) pOneSided += p;
+    } else {
+      if (x <= a) pOneSided += p;
+    }
+  }
+
+  pTwoSided = Math.min(1.0, Math.max(0.0, pTwoSided));
+  pTwoSided = Math.min(1.0, Math.max(0.0, pTwoSided));
+  pOneSided = Math.min(1.0, Math.max(0.0, pOneSided));
+
+  return {
+    oddsRatio: Number(oddsRatio.toFixed(4)),
+    pTwoSided: Number(pTwoSided.toFixed(4)),
+    pOneSided: Number(pOneSided.toFixed(4)),
+    twoSided: Number(pTwoSided.toFixed(4)),
+    oneSided: Number(pOneSided.toFixed(4)),
+  };
+}
+
+/**
+ * Linear-by-Linear Association Chi-Square statistic: M^2 = (N - 1) * r^2.
+ * df = 1, asymptotically distributed as chi-square.
+ */
+export function computeLinearByLinearAssociation(
+  countMatrix: number[][],
+  rowTotals?: number[],
+  colTotals?: number[],
+  grandTotal?: number
+): { value: number; df: number; sig: number } {
+  if (!countMatrix || countMatrix.length < 2 || !countMatrix[0] || countMatrix[0].length < 2) {
+    return { value: 0, df: 1, sig: 1 };
+  }
+
+  const R = countMatrix.length;
+  const C = countMatrix[0].length;
+  const rT = rowTotals ?? countMatrix.map((r) => r.reduce((a, b) => a + b, 0));
+  const cT = colTotals ?? countMatrix[0].map((_, cIdx) => countMatrix.reduce((acc, row) => acc + row[cIdx], 0));
+  const gT = grandTotal ?? rT.reduce((a, b) => a + b, 0);
+
+  if (gT <= 1) {
+    return { value: 0, df: 1, sig: 1 };
+  }
+
+  // Compute mean row score and mean col score
+  let sumU = 0;
+  let sumV = 0;
+  let sumU2 = 0;
+  let sumV2 = 0;
+  let sumUV = 0;
+
+  for (let r = 0; r < R; r++) {
+    const u = r + 1; // 1-based scores
+    sumU += u * rT[r];
+    sumU2 += u * u * rT[r];
+    for (let c = 0; c < C; c++) {
+      const v = c + 1;
+      const count = countMatrix[r][c];
+      sumUV += u * v * count;
+    }
+  }
+  for (let c = 0; c < C; c++) {
+    const v = c + 1;
+    sumV += v * cT[c];
+    sumV2 += v * v * cT[c];
+  }
+
+  const covUV = sumUV - (sumU * sumV) / gT;
+  const varU = sumU2 - (sumU * sumU) / gT;
+  const varV = sumV2 - (sumV * sumV) / gT;
+
+  if (varU <= 0 || varV <= 0) {
+    return { value: 0, df: 1, sig: 1 };
+  }
+
+  const rPearson = covUV / Math.sqrt(varU * varV);
+  const m2 = (gT - 1) * Math.pow(rPearson, 2);
+  const sig = chiSquarePValue(m2, 1);
+
+  return {
+    value: Number(m2.toFixed(3)),
+    df: 1,
+    sig: Number(sig.toFixed(4)),
+  };
+}
+
+/**
+ * Symmetric Measures for Crosstabulation:
+ * - Phi coefficient
+ * - Cramer's V
+ * - Contingency Coefficient
+ */
+export function computeSymmetricMeasures(
+  chiSq: number,
+  grandTotal: number,
+  numRows: number,
+  numCols: number,
+  pVal?: number
+): {
+  phi: number;
+  cramersV: number;
+  contingencyCoeff: number;
+  approxSig: number;
+} {
+  if (grandTotal <= 0) {
+    return { phi: 0, cramersV: 0, contingencyCoeff: 0, approxSig: 1 };
+  }
+
+  const phi = Math.sqrt(Math.max(0, chiSq / grandTotal));
+  const minDim = Math.max(1, Math.min(numRows - 1, numCols - 1));
+  const cramersV = Math.sqrt(Math.max(0, chiSq / (grandTotal * minDim)));
+  const contingencyCoeff = Math.sqrt(Math.max(0, chiSq / (chiSq + grandTotal)));
+  const effectiveP = pVal !== undefined ? pVal : chiSquarePValue(chiSq, Math.max(1, (numRows - 1) * (numCols - 1)));
+
+  return {
+    phi: Number(phi.toFixed(3)),
+    cramersV: Number(cramersV.toFixed(3)),
+    contingencyCoeff: Number(contingencyCoeff.toFixed(3)),
+    approxSig: Number(effectiveP.toFixed(4)),
+  };
+}
+
+/**
+ * Risk Estimate for 2x2 contingency table (Epidemiological statistics):
+ * - Odds Ratio for Row 1 vs Row 2
+ * - Relative Risk for Cohort 1
+ * - Relative Risk for Cohort 2
+ * With asymptotic 95% Confidence Intervals.
+ */
+export function computeRiskEstimates(
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  row1Label: string,
+  row2Label: string,
+  col1Label: string,
+  col2Label: string
+): Array<{
+  statistic: string;
+  value: number;
+  ciLower: number;
+  ciUpper: number;
+}> {
+  const estimates: Array<{ statistic: string; value: number; ciLower: number; ciUpper: number }> = [];
+
+  // 1. Odds Ratio
+  if (b * c > 0 && a * d > 0) {
+    const orVal = (a * d) / (b * c);
+    const seLnOr = Math.sqrt(1 / a + 1 / b + 1 / c + 1 / d);
+    estimates.push({
+      statistic: `Odds Ratio for ${row1Label} (${row1Label} / ${row2Label})`,
+      value: Number(orVal.toFixed(3)),
+      ciLower: Number(Math.exp(Math.log(orVal) - 1.96 * seLnOr).toFixed(3)),
+      ciUpper: Number(Math.exp(Math.log(orVal) + 1.96 * seLnOr).toFixed(3)),
+    });
+  }
+
+  // 2. Relative Risk for Cohort (Col 1)
+  const n1 = a + b;
+  const n2 = c + d;
+  if (n1 > 0 && n2 > 0 && a > 0 && c > 0) {
+    const p1 = a / n1;
+    const p2 = c / n2;
+    const rr1 = p1 / p2;
+    const seLnRr1 = Math.sqrt((1 - p1) / a + (1 - p2) / c);
+    estimates.push({
+      statistic: `For cohort ${col1Label} = ${col1Label}`,
+      value: Number(rr1.toFixed(3)),
+      ciLower: Number(Math.exp(Math.log(rr1) - 1.96 * seLnRr1).toFixed(3)),
+      ciUpper: Number(Math.exp(Math.log(rr1) + 1.96 * seLnRr1).toFixed(3)),
+    });
+  }
+
+  // 3. Relative Risk for Cohort (Col 2)
+  if (n1 > 0 && n2 > 0 && b > 0 && d > 0) {
+    const q1 = b / n1;
+    const q2 = d / n2;
+    const rr2 = q1 / q2;
+    const seLnRr2 = Math.sqrt((1 - q1) / b + (1 - q2) / d);
+    estimates.push({
+      statistic: `For cohort ${col2Label} = ${col2Label}`,
+      value: Number(rr2.toFixed(3)),
+      ciLower: Number(Math.exp(Math.log(rr2) - 1.96 * seLnRr2).toFixed(3)),
+      ciUpper: Number(Math.exp(Math.log(rr2) + 1.96 * seLnRr2).toFixed(3)),
+    });
+  }
+
+  return estimates;
+}
+
+// ============================================================================
+// 15. NONPARAMETRIC / RANK CORRELATIONS (Spearman rho & Kendall tau-b)
+// ============================================================================
+
+/**
+ * Assigns fractional (average) ranks to an array of numbers (1-based), handling ties.
+ */
+export function computeRanks(values: number[]): number[] {
+  const n = values.length;
+  const indexed = values.map((val, idx) => ({ val, idx }));
+  indexed.sort((a, b) => a.val - b.val);
+
+  const ranks = new Array(n).fill(0);
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j < n - 1 && Math.abs(indexed[j + 1].val - indexed[j].val) < 1e-12) {
+      j++;
+    }
+    const avgRank = (i + 1 + j + 1) / 2;
+    for (let k = i; k <= j; k++) {
+      ranks[indexed[k].idx] = avgRank;
+    }
+    i = j + 1;
+  }
+  return ranks;
+}
+
+/**
+ * Computes Spearman rank correlation coefficient and significance.
+ * Matches IBM SPSS Statistics CORRELATIONS /NONPAR=SPEARMAN.
+ */
+export function computeSpearmanCorrelation(
+  pairs: [number, number][],
+  twoTailed: boolean = true
+): { coefficient: number | null; sig: number | null; n: number; is_constant: boolean } {
+  const n = pairs.length;
+  if (n < 2) {
+    return { coefficient: null, sig: null, n, is_constant: false };
+  }
+
+  const xs = pairs.map((p) => p[0]);
+  const ys = pairs.map((p) => p[1]);
+
+  const ranksX = computeRanks(xs);
+  const ranksY = computeRanks(ys);
+
+  const meanX = ranksX.reduce((a, b) => a + b, 0) / n;
+  const meanY = ranksY.reduce((a, b) => a + b, 0) / n;
+
+  let num = 0;
+  let denX = 0;
+  let denY = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = ranksX[i] - meanX;
+    const dy = ranksY[i] - meanY;
+    num += dx * dy;
+    denX += dx * dx;
+    denY += dy * dy;
+  }
+
+  if (denX === 0 || denY === 0) {
+    return { coefficient: null, sig: null, n, is_constant: true };
+  }
+
+  let rho = num / Math.sqrt(denX * denY);
+  rho = Math.max(-1.0, Math.min(1.0, rho));
+
+  let pVal: number | null = null;
+  if (n >= 3) {
+    if (Math.abs(rho) >= 1.0 - 1e-12) {
+      pVal = 0.0;
+    } else {
+      const tStat = (rho * Math.sqrt(n - 2)) / Math.sqrt(1 - rho * rho);
+      const twoTailP = studentTPValue(tStat, n - 2);
+      pVal = twoTailed ? twoTailP : twoTailP / 2;
+    }
+  }
+
+  return {
+    coefficient: Number(rho.toFixed(3)),
+    sig: pVal !== null ? Number(pVal.toFixed(4)) : null,
+    n,
+    is_constant: false,
+  };
+}
+
+/**
+ * Computes Kendall's tau-b rank correlation coefficient and asymptotic significance.
+ * Matches IBM SPSS Statistics CORRELATIONS /NONPAR=KENDALL.
+ */
+export function computeKendallTauB(
+  pairs: [number, number][],
+  twoTailed: boolean = true
+): { coefficient: number | null; sig: number | null; n: number; is_constant: boolean } {
+  const n = pairs.length;
+  if (n < 2) {
+    return { coefficient: null, sig: null, n, is_constant: false };
+  }
+
+  const n0 = (n * (n - 1)) / 2;
+  let p = 0; // concordant
+  let q = 0; // discordant
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const dx = pairs[i][0] - pairs[j][0];
+      const dy = pairs[i][1] - pairs[j][1];
+      const prod = dx * dy;
+      if (prod > 0) p++;
+      else if (prod < 0) q++;
+    }
+  }
+
+  // Count tie frequencies in X
+  const xCounts = new Map<number, number>();
+  pairs.forEach((pair) => xCounts.set(pair[0], (xCounts.get(pair[0]) || 0) + 1));
+  let n1 = 0;
+  xCounts.forEach((cnt) => {
+    if (cnt > 1) n1 += (cnt * (cnt - 1)) / 2;
+  });
+
+  // Count tie frequencies in Y
+  const yCounts = new Map<number, number>();
+  pairs.forEach((pair) => yCounts.set(pair[1], (yCounts.get(pair[1]) || 0) + 1));
+  let n2 = 0;
+  yCounts.forEach((cnt) => {
+    if (cnt > 1) n2 += (cnt * (cnt - 1)) / 2;
+  });
+
+  const nx = n0 - n1;
+  const ny = n0 - n2;
+
+  if (nx <= 0 || ny <= 0) {
+    return { coefficient: null, sig: null, n, is_constant: true };
+  }
+
+  let tauB = (p - q) / Math.sqrt(nx * ny);
+  tauB = Math.max(-1.0, Math.min(1.0, tauB));
+
+  let pVal: number | null = null;
+  if (n >= 4) {
+    // Under H0, asymptotic variance sigma0^2 = 2*(2N+5) / (9*N*(N-1))
+    const v0 = (2 * (2 * n + 5)) / (9 * n * (n - 1));
+    const se0 = Math.sqrt(v0);
+    const z = tauB / se0;
+    const twoTailP = 2 * (1 - normalCdf(Math.abs(z)));
+    pVal = twoTailed ? twoTailP : twoTailP / 2;
+  }
+
+  return {
+    coefficient: Number(tauB.toFixed(3)),
+    sig: pVal !== null ? Number(pVal.toFixed(4)) : null,
+    n,
+    is_constant: false,
+  };
+}
+

@@ -399,27 +399,76 @@ export function buildExcelWorkbook(outputs: OutputItem[]): XLSX.WorkBook {
       });
     }
 
-    // 3. PEARSON CORRELATIONS
-    else if (type === 'correlations' && Array.isArray(data.matrix)) {
-      const rows: any[] = [];
-      data.matrix.forEach((rowItem: any) => {
-        const rObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'Pearson Correlation' };
-        const sigObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'Sig. (2-tailed)' };
-        const nObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'N' };
+    // 3. CORRELATIONS (PEARSON & NONPARAMETRIC)
+    else if (type === 'correlations') {
+      const pMat = data.pearson_matrix || data.matrix;
+      if (Array.isArray(pMat)) {
+        const rows: any[] = [];
+        pMat.forEach((rowItem: any) => {
+          const rObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'Pearson Correlation' };
+          const sigObj: Record<string, any> = { Variable: rowItem.variable, Metric: `Sig. (${data.options?.twoTailed === false ? '1-tailed' : '2-tailed'})` };
+          const nObj: Record<string, any> = { Variable: rowItem.variable, Metric: 'N' };
 
-        (rowItem.correlations || []).forEach((c: any) => {
-          rObj[c.var2] = c.var1 === c.var2 ? 1 : (c.coefficient ?? '.');
-          sigObj[c.var2] = c.var1 === c.var2 ? '' : (c.sig_2_tailed === 0 ? '.000' : (c.sig_2_tailed ?? '.'));
-          nObj[c.var2] = c.n ?? '.';
+          (rowItem.correlations || []).forEach((c: any) => {
+            rObj[c.var2] = c.var1 === c.var2 ? 1 : (c.coefficient ?? '.');
+            sigObj[c.var2] = c.var1 === c.var2 ? '' : (c.sig === 0 || c.sig_2_tailed === 0 ? '.000' : (c.sig ?? c.sig_2_tailed ?? '.'));
+            nObj[c.var2] = c.n ?? '.';
+          });
+
+          rows.push(rObj, sigObj, nObj);
         });
 
-        rows.push(rObj, sigObj, nObj);
-      });
+        if (rows.length > 0) {
+          const ws = XLSX.utils.json_to_sheet(rows);
+          const name = sanitizeSheetName(`Correlations_${++sheetCount}`, existingSheetNames);
+          XLSX.utils.book_append_sheet(wb, ws, name);
+        }
+      }
 
-      if (rows.length > 0) {
-        const ws = XLSX.utils.json_to_sheet(rows);
-        const name = sanitizeSheetName(`Correlations_${++sheetCount}`, existingSheetNames);
-        XLSX.utils.book_append_sheet(wb, ws, name);
+      // Nonparametric correlations (Kendall / Spearman)
+      if (Array.isArray(data.kendall_matrix) || Array.isArray(data.spearman_matrix)) {
+        const npRows: any[] = [];
+        if (Array.isArray(data.kendall_matrix)) {
+          data.kendall_matrix.forEach((rowItem: any) => {
+            const rObj: Record<string, any> = { Method: "Kendall's tau_b", Variable: rowItem.variable, Metric: 'Correlation Coefficient' };
+            rowItem.correlations?.forEach((c: any) => {
+              rObj[c.var2] = c.coefficient !== null ? (c.var1 === c.var2 ? '1.000' : `${c.coefficient}${c.flag || ''}`) : '.';
+            });
+            npRows.push(rObj);
+            const sigObj: Record<string, any> = { Method: "Kendall's tau_b", Variable: rowItem.variable, Metric: 'Sig.' };
+            rowItem.correlations?.forEach((c: any) => {
+              sigObj[c.var2] = c.var1 === c.var2 ? '.' : (c.sig !== null ? (c.sig === 0 ? '.000' : c.sig) : '.');
+            });
+            npRows.push(sigObj);
+            const nObj: Record<string, any> = { Method: "Kendall's tau_b", Variable: rowItem.variable, Metric: 'N' };
+            rowItem.correlations?.forEach((c: any) => {
+              nObj[c.var2] = c.n ?? '.';
+            });
+            npRows.push(nObj);
+          });
+        }
+        if (Array.isArray(data.spearman_matrix)) {
+          data.spearman_matrix.forEach((rowItem: any) => {
+            const rObj: Record<string, any> = { Method: "Spearman's rho", Variable: rowItem.variable, Metric: 'Correlation Coefficient' };
+            rowItem.correlations?.forEach((c: any) => {
+              rObj[c.var2] = c.coefficient !== null ? (c.var1 === c.var2 ? '1.000' : `${c.coefficient}${c.flag || ''}`) : '.';
+            });
+            npRows.push(rObj);
+            const sigObj: Record<string, any> = { Method: "Spearman's rho", Variable: rowItem.variable, Metric: 'Sig.' };
+            rowItem.correlations?.forEach((c: any) => {
+              sigObj[c.var2] = c.var1 === c.var2 ? '.' : (c.sig !== null ? (c.sig === 0 ? '.000' : c.sig) : '.');
+            });
+            npRows.push(sigObj);
+            const nObj: Record<string, any> = { Method: "Spearman's rho", Variable: rowItem.variable, Metric: 'N' };
+            rowItem.correlations?.forEach((c: any) => {
+              nObj[c.var2] = c.n ?? '.';
+            });
+            npRows.push(nObj);
+          });
+        }
+        const wsNP = XLSX.utils.json_to_sheet(npRows);
+        const nameNP = sanitizeSheetName(`Nonpar_Corr_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsNP, nameNP);
       }
     }
 
@@ -670,19 +719,110 @@ export function buildExcelWorkbook(outputs: OutputItem[]): XLSX.WorkBook {
 
     // 9. CROSSTABS
     else if (type === 'crosstabs' && data.cells) {
+      // 9a. Case Processing Summary
+      if (data.case_summary) {
+        const caseRows = [
+          {
+            Comparison: `${data.row_var} * ${data.col_var}`,
+            'Valid N': data.case_summary.valid,
+            'Valid Percent': `${data.case_summary.valid_percent}%`,
+            'Missing N': data.case_summary.missing,
+            'Missing Percent': `${data.case_summary.missing_percent}%`,
+            'Total N': data.case_summary.total,
+            'Total Percent': `${data.case_summary.total_percent}%`,
+          },
+        ];
+        const wsCases = XLSX.utils.json_to_sheet(caseRows);
+        const nameCases = sanitizeSheetName(`Cases_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsCases, nameCases);
+      }
+
+      // 9b. Crosstabulation Table
       const rowsFormatted: any[] = [];
       data.row_categories?.forEach((rc: string, rIdx: number) => {
-        const rowObj: Record<string, any> = { [data.row_var]: rc };
+        // Count row
+        const countObj: Record<string, any> = { [data.row_var]: rc, Metric: 'Count' };
         data.col_categories?.forEach((cc: string, cIdx: number) => {
-          rowObj[cc] = data.cells[rIdx]?.[cIdx]?.count ?? 0;
+          countObj[cc] = data.cells[rIdx]?.[cIdx]?.count ?? 0;
         });
-        rowObj['Total'] = data.row_totals?.[rIdx] ?? 0;
-        rowsFormatted.push(rowObj);
+        countObj['Total'] = data.row_totals?.[rIdx] ?? 0;
+        rowsFormatted.push(countObj);
+
+        // Expected row if available
+        if (data.options?.expected) {
+          const expObj: Record<string, any> = { [data.row_var]: rc, Metric: 'Expected Count' };
+          data.col_categories?.forEach((cc: string, cIdx: number) => {
+            expObj[cc] = data.cells[rIdx]?.[cIdx]?.expected ?? 0;
+          });
+          expObj['Total'] = data.row_totals?.[rIdx] ?? 0;
+          rowsFormatted.push(expObj);
+        }
+
+        // Row percent
+        if (data.options?.rowPct !== false) {
+          const pctObj: Record<string, any> = { [data.row_var]: rc, Metric: `% within ${data.row_var}` };
+          data.col_categories?.forEach((cc: string, cIdx: number) => {
+            pctObj[cc] = `${data.cells[rIdx]?.[cIdx]?.row_percent ?? 0}%`;
+          });
+          pctObj['Total'] = '100.0%';
+          rowsFormatted.push(pctObj);
+        }
       });
+
+      // Total row
+      const totalCountObj: Record<string, any> = { [data.row_var]: 'Total', Metric: 'Count' };
+      data.col_categories?.forEach((cc: string, cIdx: number) => {
+        totalCountObj[cc] = data.col_totals?.[cIdx] ?? 0;
+      });
+      totalCountObj['Total'] = data.grand_total ?? 0;
+      rowsFormatted.push(totalCountObj);
+
       const ws = XLSX.utils.json_to_sheet(rowsFormatted);
       const name = sanitizeSheetName(`Crosstab_${++sheetCount}`, existingSheetNames);
       XLSX.utils.book_append_sheet(wb, ws, name);
+
+      // 9c. Chi-Square Tests
+      if (Array.isArray(data.chi_square_tests) && data.chi_square_tests.length > 0) {
+        const chiRows = data.chi_square_tests.map((t: any) => ({
+          Test: t.test,
+          Value: t.value,
+          df: t.df ?? '.',
+          'Asymptotic Sig (2-sided)': t.asymp_sig_2_sided ?? '.',
+          'Exact Sig (2-sided)': t.exact_sig_2_sided ?? '',
+          'Exact Sig (1-sided)': t.exact_sig_1_sided ?? '',
+        }));
+        const wsChi = XLSX.utils.json_to_sheet(chiRows);
+        const nameChi = sanitizeSheetName(`ChiSquare_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsChi, nameChi);
+      }
+
+      // 9d. Symmetric Measures
+      if (Array.isArray(data.symmetric_measures) && data.symmetric_measures.length > 0) {
+        const symRows = data.symmetric_measures.map((sm: any) => ({
+          Category: sm.category,
+          Measure: sm.measure,
+          Value: sm.value,
+          'Approximate Sig': sm.approx_sig ?? '.',
+        }));
+        const wsSym = XLSX.utils.json_to_sheet(symRows);
+        const nameSym = sanitizeSheetName(`Symmetric_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsSym, nameSym);
+      }
+
+      // 9e. Risk Estimates
+      if (Array.isArray(data.risk_estimates) && data.risk_estimates.length > 0) {
+        const riskRows = data.risk_estimates.map((re: any) => ({
+          Statistic: re.statistic,
+          Value: re.value,
+          '95% CI Lower': re.ciLower,
+          '95% CI Upper': re.ciUpper,
+        }));
+        const wsRisk = XLSX.utils.json_to_sheet(riskRows);
+        const nameRisk = sanitizeSheetName(`Risk_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsRisk, nameRisk);
+      }
     }
+
 
     // 10. MEANS REPORT
     else if (type === 'means_report' && Array.isArray(data.tables)) {

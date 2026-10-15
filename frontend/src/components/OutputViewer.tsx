@@ -1483,7 +1483,12 @@ export function getOutlineNodes(item: OutputItem): OutlineNode[] {
       break;
 
     case 'correlations':
-      nodes.push({ id: `output-${item.id}-table-correlations`, label: 'Correlations', iconType: 'table' });
+      if (data.pearson_matrix || (!data.spearman_matrix && !data.kendall_matrix)) {
+        nodes.push({ id: `output-${item.id}-table-correlations`, label: 'Correlations', iconType: 'table' });
+      }
+      if (data.spearman_matrix || data.kendall_matrix) {
+        nodes.push({ id: `output-${item.id}-table-nonpar-correlations`, label: 'Nonparametric Correlations', iconType: 'table' });
+      }
       break;
 
     case 'one_sample_t_test':
@@ -1550,9 +1555,18 @@ export function getOutlineNodes(item: OutputItem): OutlineNode[] {
       break;
 
     case 'crosstabs':
+      if (data.case_summary) {
+        nodes.push({ id: `output-${item.id}-table-cases`, label: 'Case Processing Summary', iconType: 'table' });
+      }
       nodes.push({ id: `output-${item.id}-table-crosstab`, label: `${data.row_var || 'Row'} * ${data.col_var || 'Col'} Crosstabulation`, iconType: 'table' });
       if (data.chi_square_tests) {
         nodes.push({ id: `output-${item.id}-table-chisquare`, label: 'Chi-Square Tests', iconType: 'table' });
+      }
+      if (data.symmetric_measures) {
+        nodes.push({ id: `output-${item.id}-table-symmetric`, label: 'Symmetric Measures', iconType: 'table' });
+      }
+      if (data.risk_estimates) {
+        nodes.push({ id: `output-${item.id}-table-risk`, label: 'Risk Estimate', iconType: 'table' });
       }
       break;
 
@@ -2023,8 +2037,56 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
 
     // 3. CROSSTABS PIVOT TABLE
     if (type === 'crosstabs') {
+      const showCount = data.options?.observed !== false;
+      const showExpected = !!data.options?.expected;
+      const showRowPct = !!data.options?.rowPct || (!data.options && true);
+      const showColPct = !!data.options?.colPct;
+      const showTotalPct = !!data.options?.totalPct;
+      const metricCount = (showCount ? 1 : 0) + (showExpected ? 1 : 0) + (showRowPct ? 1 : 0) + (showColPct ? 1 : 0) + (showTotalPct ? 1 : 0) || 1;
+
+      const hasExactSig = Array.isArray(data.chi_square_tests) && data.chi_square_tests.some((t: any) => t.exact_sig_2_sided !== undefined);
+
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Case Processing Summary */}
+          {data.case_summary && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-cases`} title="Case Processing Summary">
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left" rowSpan={3}></th>
+                    <th className="align-center" colSpan={6}>Cases</th>
+                  </tr>
+                  <tr>
+                    <th className="align-center" colSpan={2}>Valid</th>
+                    <th className="align-center" colSpan={2}>Missing</th>
+                    <th className="align-center" colSpan={2}>Total</th>
+                  </tr>
+                  <tr>
+                    <th>N</th>
+                    <th>Percent</th>
+                    <th>N</th>
+                    <th>Percent</th>
+                    <th>N</th>
+                    <th>Percent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="align-left" style={{ fontWeight: 600 }}>{data.row_var} * {data.col_var}</td>
+                    <td>{data.case_summary.valid}</td>
+                    <td>{data.case_summary.valid_percent}%</td>
+                    <td>{data.case_summary.missing}</td>
+                    <td>{data.case_summary.missing_percent}%</td>
+                    <td>{data.case_summary.total}</td>
+                    <td>{data.case_summary.total_percent}%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+
+          {/* Crosstabulation Table */}
           <SPSSPivotTableWrapper id={`output-${item.id}-table-crosstab`} title={`${data.row_var} * ${data.col_var} Crosstabulation`}>
             <table className="spss-pivot-table">
               <thead>
@@ -2040,63 +2102,164 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                 </tr>
               </thead>
               <tbody>
-                {data.row_categories?.map((rowCat: string, rIdx: number) => (
-                  <React.Fragment key={rIdx}>
-                    <tr>
-                      <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
-                        {rowCat}
-                      </td>
-                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
-                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                        <td key={cIdx}>{cell.count}</td>
-                      ))}
-                      <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
-                    </tr>
-                    <tr>
-                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
-                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                        <td key={cIdx}>{cell.expected}</td>
-                      ))}
-                      <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
-                    </tr>
-                    <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
-                      <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
-                      {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
-                        <td key={cIdx}>{cell.row_percent}%</td>
-                      ))}
-                      <td style={{ fontWeight: 600 }}>100.0%</td>
-                    </tr>
-                  </React.Fragment>
-                ))}
+                {data.row_categories?.map((rowCat: string, rIdx: number) => {
+                  let firstMetricRendered = false;
+                  return (
+                    <React.Fragment key={rIdx}>
+                      {showCount && (() => {
+                        const isFirst = !firstMetricRendered;
+                        firstMetricRendered = true;
+                        return (
+                          <tr>
+                            {isFirst && (
+                              <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                                {rowCat}
+                              </td>
+                            )}
+                            <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
+                            {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                              <td key={cIdx}>{cell.count}</td>
+                            ))}
+                            <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {showExpected && (() => {
+                        const isFirst = !firstMetricRendered;
+                        firstMetricRendered = true;
+                        return (
+                          <tr>
+                            {isFirst && (
+                              <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                                {rowCat}
+                              </td>
+                            )}
+                            <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                            {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                              <td key={cIdx}>{cell.expected}</td>
+                            ))}
+                            <td style={{ fontWeight: 600 }}>{data.row_totals?.[rIdx]}</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {showRowPct && (() => {
+                        const isFirst = !firstMetricRendered;
+                        firstMetricRendered = true;
+                        return (
+                          <tr style={(!showColPct && !showTotalPct) ? { borderBottom: '1px solid var(--border-header)' } : undefined}>
+                            {isFirst && (
+                              <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                                {rowCat}
+                              </td>
+                            )}
+                            <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                            {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                              <td key={cIdx}>{cell.row_percent}%</td>
+                            ))}
+                            <td style={{ fontWeight: 600 }}>100.0%</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {showColPct && (() => {
+                        const isFirst = !firstMetricRendered;
+                        firstMetricRendered = true;
+                        return (
+                          <tr style={!showTotalPct ? { borderBottom: '1px solid var(--border-header)' } : undefined}>
+                            {isFirst && (
+                              <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                                {rowCat}
+                              </td>
+                            )}
+                            <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.col_var}</td>
+                            {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                              <td key={cIdx}>{cell.col_percent ?? (data.col_totals?.[cIdx] ? Number(((cell.count / data.col_totals[cIdx]) * 100).toFixed(1)) : 0)}%</td>
+                            ))}
+                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100).toFixed(1)) : 0}%</td>
+                          </tr>
+                        );
+                      })()}
+
+                      {showTotalPct && (() => {
+                        const isFirst = !firstMetricRendered;
+                        firstMetricRendered = true;
+                        return (
+                          <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                            {isFirst && (
+                              <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 600, verticalAlign: 'top', borderBottom: '1px solid var(--border-header)' }}>
+                                {rowCat}
+                              </td>
+                            )}
+                            <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% of Total</td>
+                            {data.cells?.[rIdx]?.map((cell: any, cIdx: number) => (
+                              <td key={cIdx}>{cell.total_percent ?? (data.grand_total > 0 ? Number(((cell.count / data.grand_total) * 100).toFixed(1)) : 0)}%</td>
+                            ))}
+                            <td style={{ fontWeight: 600 }}>{data.grand_total > 0 ? Number(((data.row_totals?.[rIdx] / data.grand_total) * 100).toFixed(1)) : 0}%</td>
+                          </tr>
+                        );
+                      })()}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Total Row */}
                 <tr className="spss-pivot-total-row">
-                  <td className="align-left" rowSpan={3} style={{ fontWeight: 700, verticalAlign: 'top' }}>Total</td>
+                  <td className="align-left" rowSpan={metricCount} style={{ fontWeight: 700, verticalAlign: 'top' }}>Total</td>
                   <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Count</td>
                   {data.col_totals?.map((colTot: number, cIdx: number) => (
                     <td key={cIdx}>{colTot}</td>
                   ))}
                   <td>{data.grand_total}</td>
                 </tr>
-                <tr>
-                  <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
-                  {data.col_totals?.map((colTot: number, cIdx: number) => (
-                    <td key={cIdx}>{colTot}</td>
-                  ))}
-                  <td>{data.grand_total}</td>
-                </tr>
-                <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
-                  <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
-                  {data.col_totals?.map((colTot: number, cIdx: number) => (
-                    <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
-                  ))}
-                  <td>100.0%</td>
-                </tr>
+                {showExpected && (
+                  <tr>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Expected Count</td>
+                    {data.col_totals?.map((colTot: number, cIdx: number) => (
+                      <td key={cIdx}>{colTot}</td>
+                    ))}
+                    <td>{data.grand_total}</td>
+                  </tr>
+                )}
+                {showRowPct && (
+                  <tr>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.row_var}</td>
+                    {data.col_totals?.map((colTot: number, cIdx: number) => (
+                      <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                    ))}
+                    <td>100.0%</td>
+                  </tr>
+                )}
+                {showColPct && (
+                  <tr>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% within {data.col_var}</td>
+                    {data.col_totals?.map((_colTot: number, cIdx: number) => (
+                      <td key={cIdx}>100.0%</td>
+                    ))}
+                    <td>100.0%</td>
+                  </tr>
+                )}
+                {showTotalPct && (
+                  <tr style={{ borderBottom: '2px solid var(--border-header)' }}>
+                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>% of Total</td>
+                    {data.col_totals?.map((colTot: number, cIdx: number) => (
+                      <td key={cIdx}>{data.grand_total > 0 ? ((colTot / data.grand_total) * 100).toFixed(1) : 0}%</td>
+                    ))}
+                    <td>100.0%</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </SPSSPivotTableWrapper>
 
           {/* Chi-Square Tests Table */}
           {data.chi_square_tests && (
-            <SPSSPivotTableWrapper id={`output-${item.id}-table-chisquare`} title="Chi-Square Tests">
+            <SPSSPivotTableWrapper
+              id={`output-${item.id}-table-chisquare`}
+              title="Chi-Square Tests"
+              notes={data.chi_square_footnote ? [data.chi_square_footnote] : undefined}
+            >
               <table className="spss-pivot-table">
                 <thead>
                   <tr>
@@ -2104,6 +2267,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                     <th>Value</th>
                     <th>df</th>
                     <th>Asymptotic Sig. (2-sided)</th>
+                    {hasExactSig && <th>Exact Sig. (2-sided)</th>}
+                    {hasExactSig && <th>Exact Sig. (1-sided)</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2113,10 +2278,81 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                       <td>{t.value}</td>
                       <td>{t.df ?? '-'}</td>
                       <td style={{ fontWeight: t.asymp_sig_2_sided < 0.05 ? 700 : 400, color: t.asymp_sig_2_sided < 0.05 ? 'var(--accent)' : 'inherit' }}>
-                        {t.asymp_sig_2_sided ?? '-'}
+                        {t.asymp_sig_2_sided !== null && t.asymp_sig_2_sided !== undefined ? (t.asymp_sig_2_sided === 0 ? '.000' : t.asymp_sig_2_sided) : '-'}
                       </td>
+                      {hasExactSig && (
+                        <td>{t.exact_sig_2_sided !== undefined ? (t.exact_sig_2_sided === 0 ? '.000' : t.exact_sig_2_sided) : ''}</td>
+                      )}
+                      {hasExactSig && (
+                        <td>{t.exact_sig_1_sided !== undefined ? (t.exact_sig_1_sided === 0 ? '.000' : t.exact_sig_1_sided) : ''}</td>
+                      )}
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+
+          {/* Symmetric Measures Table */}
+          {data.symmetric_measures && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-symmetric`} title="Symmetric Measures">
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left" colSpan={2}></th>
+                    <th>Value</th>
+                    <th>Approximate Significance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.symmetric_measures.map((sm: any, idx: number) => (
+                    <tr key={idx}>
+                      <td className="align-left" style={{ fontWeight: 600 }}>{sm.category}</td>
+                      <td className="align-left">{sm.measure}</td>
+                      <td>{sm.value}</td>
+                      <td>{sm.approx_sig !== null && sm.approx_sig !== undefined ? (sm.approx_sig === 0 ? '.000' : sm.approx_sig) : '-'}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="align-left" colSpan={2} style={{ fontWeight: 600 }}>N of Valid Cases</td>
+                    <td>{data.grand_total}</td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+
+          {/* Risk Estimate Table */}
+          {data.risk_estimates && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-risk`} title="Risk Estimate">
+              <table className="spss-pivot-table">
+                <thead>
+                  <tr>
+                    <th className="align-left" rowSpan={2}>Statistic</th>
+                    <th rowSpan={2}>Value</th>
+                    <th className="align-center" colSpan={2}>95% Confidence Interval</th>
+                  </tr>
+                  <tr>
+                    <th>Lower</th>
+                    <th>Upper</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.risk_estimates.map((re: any, idx: number) => (
+                    <tr key={idx}>
+                      <td className="align-left">{re.statistic}</td>
+                      <td>{re.value}</td>
+                      <td>{re.ciLower}</td>
+                      <td>{re.ciUpper}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className="align-left" style={{ fontWeight: 600 }}>N of Valid Cases</td>
+                    <td>{data.grand_total}</td>
+                    <td></td>
+                    <td></td>
+                  </tr>
                 </tbody>
               </table>
             </SPSSPivotTableWrapper>
@@ -2127,56 +2363,161 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
 
     // 4. CORRELATIONS PIVOT TABLE
     if (type === 'correlations') {
+      const showPearson = !!data.pearson_matrix || (!data.spearman_matrix && !data.kendall_matrix);
+      const showNonpar = !!data.spearman_matrix || !!data.kendall_matrix;
+
       return (
-        <SPSSPivotTableWrapper id={`output-${item.id}-table-correlations`} title="Correlations" notes={data.notes}>
-          <table className="spss-pivot-table">
-            <thead>
-              <tr>
-                <th className="align-left" colSpan={2}>Variable</th>
-                {data.variables?.map((v: string) => (
-                  <th key={v} className="align-center">{v}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {data.matrix?.map((rowItem: any, rIdx: number) => (
-                <React.Fragment key={rIdx}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Pearson Correlations Table */}
+          {showPearson && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-correlations`} title="Correlations" notes={data.notes}>
+              <table className="spss-pivot-table">
+                <thead>
                   <tr>
-                    <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top' }}>
-                      {rowItem.variable}
-                    </td>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pearson Correlation</td>
-                    {rowItem.correlations?.map((c: any, cIdx: number) => (
-                      <td key={cIdx} style={{ fontWeight: 600 }}>
-                        {c.coefficient !== null && c.coefficient !== undefined
-                          ? (c.var1 === c.var2 ? '1' : `${c.coefficient}${c.flag || ''}`)
-                          : '.'}
-                      </td>
+                    <th className="align-left" colSpan={2}>Variable</th>
+                    {data.variables?.map((v: string) => (
+                      <th key={v} className="align-center">{v}</th>
                     ))}
                   </tr>
+                </thead>
+                <tbody>
+                  {(data.pearson_matrix || data.matrix)?.map((rowItem: any, rIdx: number) => (
+                    <React.Fragment key={rIdx}>
+                      <tr>
+                        <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                          {rowItem.variable}
+                        </td>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pearson Correlation</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontWeight: 600 }}>
+                            {c.coefficient !== null && c.coefficient !== undefined
+                              ? (c.var1 === c.var2 ? '1' : `${c.coefficient}${c.flag || ''}`)
+                              : '.'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sig. ({data.options?.twoTailed === false ? '1-tailed' : '2-tailed'})</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>
+                            {c.var1 === c.var2
+                              ? ''
+                              : (c.sig !== null && c.sig !== undefined
+                                  ? (c.sig === 0 ? '.000' : c.sig)
+                                  : (c.sig_2_tailed !== null && c.sig_2_tailed !== undefined ? (c.sig_2_tailed === 0 ? '.000' : c.sig_2_tailed) : '.'))}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>N</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>{c.n ?? '.'}</td>
+                        ))}
+                      </tr>
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+
+          {/* Nonparametric Correlations Table */}
+          {showNonpar && (
+            <SPSSPivotTableWrapper id={`output-${item.id}-table-nonpar-correlations`} title="Nonparametric Correlations" notes={data.notes}>
+              <table className="spss-pivot-table">
+                <thead>
                   <tr>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sig. (2-tailed)</td>
-                    {rowItem.correlations?.map((c: any, cIdx: number) => (
-                      <td key={cIdx} style={{ fontSize: 11 }}>
-                        {c.var1 === c.var2
-                          ? ''
-                          : (c.sig_2_tailed !== null && c.sig_2_tailed !== undefined
-                              ? (c.sig_2_tailed === 0 ? '.000' : c.sig_2_tailed)
-                              : '.')}
-                      </td>
+                    <th className="align-left" colSpan={3}></th>
+                    {data.variables?.map((v: string) => (
+                      <th key={v} className="align-center">{v}</th>
                     ))}
                   </tr>
-                  <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
-                    <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>N</td>
-                    {rowItem.correlations?.map((c: any, cIdx: number) => (
-                      <td key={cIdx} style={{ fontSize: 11 }}>{c.n ?? '.'}</td>
-                    ))}
-                  </tr>
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </SPSSPivotTableWrapper>
+                </thead>
+                <tbody>
+                  {/* Kendall's tau_b block */}
+                  {data.kendall_matrix?.map((rowItem: any, rIdx: number) => (
+                    <React.Fragment key={`kendall-${rIdx}`}>
+                      <tr>
+                        {rIdx === 0 && (
+                          <td className="align-left" rowSpan={data.kendall_matrix.length * 3} style={{ fontWeight: 700, verticalAlign: 'top', borderRight: '1px solid var(--border-header)' }}>
+                            Kendall's tau_b
+                          </td>
+                        )}
+                        <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                          {rowItem.variable}
+                        </td>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Correlation Coefficient</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontWeight: 600 }}>
+                            {c.coefficient !== null && c.coefficient !== undefined
+                              ? (c.var1 === c.var2 ? '1.000' : `${c.coefficient}${c.flag || ''}`)
+                              : '.'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sig. ({data.options?.twoTailed === false ? '1-tailed' : '2-tailed'})</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>
+                            {c.var1 === c.var2
+                              ? '.'
+                              : (c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.')}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>N</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>{c.n ?? '.'}</td>
+                        ))}
+                      </tr>
+                    </React.Fragment>
+                  ))}
+
+                  {/* Spearman's rho block */}
+                  {data.spearman_matrix?.map((rowItem: any, rIdx: number) => (
+                    <React.Fragment key={`spearman-${rIdx}`}>
+                      <tr>
+                        {rIdx === 0 && (
+                          <td className="align-left" rowSpan={data.spearman_matrix.length * 3} style={{ fontWeight: 700, verticalAlign: 'top', borderRight: '1px solid var(--border-header)' }}>
+                            Spearman's rho
+                          </td>
+                        )}
+                        <td className="align-left" rowSpan={3} style={{ fontWeight: 600, verticalAlign: 'top' }}>
+                          {rowItem.variable}
+                        </td>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Correlation Coefficient</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontWeight: 600 }}>
+                            {c.coefficient !== null && c.coefficient !== undefined
+                              ? (c.var1 === c.var2 ? '1.000' : `${c.coefficient}${c.flag || ''}`)
+                              : '.'}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sig. ({data.options?.twoTailed === false ? '1-tailed' : '2-tailed'})</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>
+                            {c.var1 === c.var2
+                              ? '.'
+                              : (c.sig !== null && c.sig !== undefined ? (c.sig === 0 ? '.000' : c.sig) : '.')}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--border-header)' }}>
+                        <td className="align-left" style={{ fontSize: 11, color: 'var(--text-muted)' }}>N</td>
+                        {rowItem.correlations?.map((c: any, cIdx: number) => (
+                          <td key={cIdx} style={{ fontSize: 11 }}>{c.n ?? '.'}</td>
+                        ))}
+                      </tr>
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </SPSSPivotTableWrapper>
+          )}
+        </div>
       );
     }
 

@@ -24,3 +24,6 @@ spss_studio.db
 # OS files
 .DS_Store
 Thumbs.db
+
+# Scratch SAV files
+*.sav
