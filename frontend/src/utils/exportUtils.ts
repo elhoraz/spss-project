@@ -580,6 +580,59 @@ export function buildExcelWorkbook(outputs: OutputItem[]): XLSX.WorkBook {
       const ws = XLSX.utils.json_to_sheet(rows);
       const name = sanitizeSheetName(`ANOVA_${++sheetCount}`, existingSheetNames);
       XLSX.utils.book_append_sheet(wb, ws, name);
+
+      // Export Post-Hoc Multiple Comparisons sheets
+      if (Array.isArray(data.post_hoc_tests) && data.post_hoc_tests.length > 0) {
+        data.post_hoc_tests.forEach((t: any) => {
+          if (Array.isArray(t.comparisons) && t.comparisons.length > 0) {
+            const phRows = t.comparisons.map((c: any) => ({
+              [`(I) ${data.factor_variable || 'Factor'}`]: c.group_i,
+              [`(J) ${data.factor_variable || 'Factor'}`]: c.group_j,
+              'Mean Difference (I-J)': c.mean_diff,
+              'Std. Error': c.se,
+              Sig: c.sig,
+              'CI Lower': c.ci_lower,
+              'CI Upper': c.ci_upper,
+            }));
+            const phWs = XLSX.utils.json_to_sheet(phRows);
+            const phName = sanitizeSheetName(`PostHoc_${(t.test_name || 'Test').replace(/[^a-zA-Z0-9]/g, '')}`, existingSheetNames);
+            XLSX.utils.book_append_sheet(wb, phWs, phName);
+          }
+        });
+      }
+    }
+
+    // REPEATED MEASURES ANOVA
+    else if (type === 'repeated_measures_anova') {
+      if (Array.isArray(data.multivariate_tests) && data.multivariate_tests.length > 0) {
+        const mvRows = data.multivariate_tests.map((m: any) => ({
+          Effect: m.effect,
+          Test: m.test,
+          Value: m.value ?? '.',
+          F: m.f ?? '.',
+          'Hypothesis df': m.hypothesis_df ?? '.',
+          'Error df': m.error_df ?? '.',
+          Sig: m.sig ?? '.',
+          'Partial Eta Squared': m.partial_eta_squared ?? '.',
+        }));
+        const mvWs = XLSX.utils.json_to_sheet(mvRows);
+        const mvName = sanitizeSheetName(`RM_Multivariate_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, mvWs, mvName);
+      }
+      if (Array.isArray(data.tests_within_subjects) && data.tests_within_subjects.length > 0) {
+        const wsRows = data.tests_within_subjects.map((w: any) => ({
+          Source: w.source,
+          'Type III Sum of Squares': w.ss ?? '.',
+          df: w.df ?? '.',
+          'Mean Square': w.ms ?? '.',
+          F: w.f ?? '.',
+          Sig: w.sig ?? '.',
+          'Partial Eta Squared': w.partialEtaSq ?? '.',
+        }));
+        const wsWs = XLSX.utils.json_to_sheet(wsRows);
+        const wsName = sanitizeSheetName(`RM_Within_${++sheetCount}`, existingSheetNames);
+        XLSX.utils.book_append_sheet(wb, wsWs, wsName);
+      }
     }
 
     // 8. LINEAR REGRESSION

@@ -1651,6 +1651,112 @@ export const SPSSPivotTableWrapper: React.FC<{
   );
 };
 
+export const PostHocPivotTable: React.FC<{
+  test: any;
+  tIdx: number;
+  item: OutputItem;
+  factorVariable: string;
+  dependentVariable: string;
+}> = ({ test, tIdx, item, factorVariable, dependentVariable }) => {
+  const [uniqueOnly, setUniqueOnly] = useState(false);
+
+  const ciPct = Math.round((1 - (test.alpha || 0.05)) * 100);
+  const testNotes = [
+    `*. The mean difference is significant at the ${test.alpha || 0.05} level.`,
+    ...(test.notes || []),
+  ];
+
+  const displayedComparisons = React.useMemo(() => {
+    if (!Array.isArray(test.comparisons)) return [];
+    if (!uniqueOnly) return test.comparisons;
+    const seen = new Set<string>();
+    return test.comparisons.filter((c: any) => {
+      const key1 = `${c.group_i}:::${c.group_j}`;
+      const key2 = `${c.group_j}:::${c.group_i}`;
+      if (seen.has(key1) || seen.has(key2)) return false;
+      seen.add(key1);
+      return true;
+    });
+  }, [test.comparisons, uniqueOnly]);
+
+  const groupCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    displayedComparisons.forEach((c: any) => {
+      counts[c.group_i] = (counts[c.group_i] || 0) + 1;
+    });
+    return counts;
+  }, [displayedComparisons]);
+
+  return (
+    <SPSSPivotTableWrapper
+      id={`output-${item.id}-table-posthoc-${tIdx}`}
+      title={`Multiple Comparisons: ${test.test_name} (${dependentVariable})`}
+      notes={testNotes}
+    >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6, gap: 4 }}>
+        <button
+          type="button"
+          className={`spss-btn ${!uniqueOnly ? 'primary' : ''}`}
+          style={{ padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}
+          onClick={() => setUniqueOnly(false)}
+          title="Display all directed pairs (I-J and J-I) matching IBM SPSS grouped layout"
+        >
+          All Pairs (SPSS Standard)
+        </button>
+        <button
+          type="button"
+          className={`spss-btn ${uniqueOnly ? 'primary' : ''}`}
+          style={{ padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}
+          onClick={() => setUniqueOnly(true)}
+          title="Display each unordered comparison only once"
+        >
+          Unique Pairs Only
+        </button>
+      </div>
+      <table className="spss-pivot-table">
+        <thead>
+          <tr>
+            <th className="align-left">(I) {factorVariable}</th>
+            <th className="align-left">(J) {factorVariable}</th>
+            <th>Mean Difference (I-J)</th>
+            <th>Std. Error</th>
+            <th>Sig.</th>
+            <th>{ciPct}% CI Lower</th>
+            <th>{ciPct}% CI Upper</th>
+          </tr>
+        </thead>
+        <tbody>
+          {displayedComparisons.map((ph: any, i: number) => {
+            const isFirstInGroup = i === 0 || displayedComparisons[i - 1].group_i !== ph.group_i;
+            const span = groupCounts[ph.group_i] || 1;
+            return (
+              <tr key={i} style={isFirstInGroup && i > 0 ? { borderTop: '1px solid var(--border-color, #e0e0e0)' } : undefined}>
+                {isFirstInGroup ? (
+                  <td
+                    className="align-left"
+                    rowSpan={span}
+                    style={{ fontWeight: 600, verticalAlign: 'top', background: 'var(--table-header-bg, #fbfbfb)' }}
+                  >
+                    {ph.group_i}
+                  </td>
+                ) : null}
+                <td className="align-left">{ph.group_j}</td>
+                <td>{ph.mean_diff}</td>
+                <td>{ph.se}</td>
+                <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
+                  {ph.sig} {ph.significant ? '*' : ''}
+                </td>
+                <td>{ph.ci_lower ?? '-'}</td>
+                <td>{ph.ci_upper ?? '-'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </SPSSPivotTableWrapper>
+  );
+};
+
 export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutputs, onDeleteOutputItem, onExport }) => {
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -2476,82 +2582,25 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
 
           {/* Post-Hoc Multiple Comparisons */}
           {Array.isArray(data.post_hoc_tests) && data.post_hoc_tests.length > 0 ? (
-            data.post_hoc_tests.map((test: any, tIdx: number) => {
-              const ciPct = Math.round((1 - (test.alpha || 0.05)) * 100);
-              const testNotes = [
-                `*. The mean difference is significant at the ${test.alpha || 0.05} level.`,
-                ...(test.notes || []),
-              ];
-              return (
-                <SPSSPivotTableWrapper
-                  key={tIdx}
-                  id={`output-${item.id}-table-posthoc-${tIdx}`}
-                  title={`Multiple Comparisons: ${test.test_name} (${data.dependent_variable})`}
-                  notes={testNotes}
-                >
-                  <table className="spss-pivot-table">
-                    <thead>
-                      <tr>
-                        <th className="align-left">(I) {data.factor_variable}</th>
-                        <th className="align-left">(J) {data.factor_variable}</th>
-                        <th>Mean Difference (I-J)</th>
-                        <th>Std. Error</th>
-                        <th>Sig.</th>
-                        <th>{ciPct}% CI Lower</th>
-                        <th>{ciPct}% CI Upper</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {test.comparisons?.map((ph: any, i: number) => (
-                        <tr key={i}>
-                          <td className="align-left">{ph.group_i}</td>
-                          <td className="align-left">{ph.group_j}</td>
-                          <td>{ph.mean_diff}</td>
-                          <td>{ph.se}</td>
-                          <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
-                            {ph.sig} {ph.significant ? '*' : ''}
-                          </td>
-                          <td>{ph.ci_lower ?? '-'}</td>
-                          <td>{ph.ci_upper ?? '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </SPSSPivotTableWrapper>
-              );
-            })
+            data.post_hoc_tests.map((test: any, tIdx: number) => (
+              <PostHocPivotTable
+                key={tIdx}
+                test={test}
+                tIdx={tIdx}
+                item={item}
+                factorVariable={data.factor_variable || 'Factor'}
+                dependentVariable={data.dependent_variable || 'Dependent'}
+              />
+            ))
           ) : (
             data.post_hoc?.length > 0 && (
-              <SPSSPivotTableWrapper id={`output-${item.id}-table-posthoc-0`} title={`Multiple Comparisons: Tukey HSD (${data.dependent_variable})`}>
-                <table className="spss-pivot-table">
-                  <thead>
-                    <tr>
-                      <th className="align-left">(I) {data.factor_variable}</th>
-                      <th className="align-left">(J) {data.factor_variable}</th>
-                      <th>Mean Difference (I-J)</th>
-                      <th>Std. Error</th>
-                      <th>Sig.</th>
-                      <th>95% CI Lower</th>
-                      <th>95% CI Upper</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.post_hoc.map((ph: any, i: number) => (
-                      <tr key={i}>
-                        <td className="align-left">{ph.group_i}</td>
-                        <td className="align-left">{ph.group_j}</td>
-                        <td>{ph.mean_diff}</td>
-                        <td>{ph.se}</td>
-                        <td style={{ fontWeight: ph.significant ? 700 : 400, color: ph.significant ? 'var(--accent)' : 'inherit' }}>
-                          {ph.sig} {ph.significant ? '*' : ''}
-                        </td>
-                        <td>{ph.ci_lower ?? '-'}</td>
-                        <td>{ph.ci_upper ?? '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </SPSSPivotTableWrapper>
+              <PostHocPivotTable
+                test={{ test_name: 'Tukey HSD', alpha: 0.05, comparisons: data.post_hoc }}
+                tIdx={0}
+                item={item}
+                factorVariable={data.factor_variable || 'Factor'}
+                dependentVariable={data.dependent_variable || 'Dependent'}
+              />
             )
           )}
         </div>
