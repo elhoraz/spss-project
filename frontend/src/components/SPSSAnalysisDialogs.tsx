@@ -280,8 +280,8 @@ export const SPSSAnalysisDialogs: React.FC<SPSSAnalysisDialogsProps> = ({
     riskEstimate: false,
     observed: true,
     expected: false,
-    rowPct: false,
-    colPct: false,
+    rowPct: true,
+    colPct: true,
     totalPct: false,
   });
 

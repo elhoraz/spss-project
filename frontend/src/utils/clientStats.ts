@@ -600,8 +600,8 @@ export function clientComputeCrosstabs(
   const effectiveOptions: CrosstabsOptions = {
     observed: options?.observed !== undefined ? options.observed : true,
     expected: options?.expected !== undefined ? options.expected : false,
-    rowPct: options?.rowPct !== undefined ? options.rowPct : false,
-    colPct: options?.colPct !== undefined ? options.colPct : false,
+    rowPct: options?.rowPct !== undefined ? options.rowPct : true,
+    colPct: options?.colPct !== undefined ? options.colPct : true,
     totalPct: options?.totalPct !== undefined ? options.totalPct : false,
     chiSquare: options?.chiSquare !== undefined ? options.chiSquare : true,
     phiCramer: options?.phiCramer !== undefined ? options.phiCramer : false,

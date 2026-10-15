@@ -2184,8 +2184,8 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
     if (type === 'crosstabs') {
       const showCount = data.options?.observed !== false;
       const showExpected = !!data.options?.expected;
-      const showRowPct = !!data.options?.rowPct || (!data.options && true);
-      const showColPct = !!data.options?.colPct;
+      const showRowPct = data.options?.rowPct !== undefined ? !!data.options.rowPct : true;
+      const showColPct = data.options?.colPct !== undefined ? !!data.options.colPct : true;
       const showTotalPct = !!data.options?.totalPct;
       const metricCount = (showCount ? 1 : 0) + (showExpected ? 1 : 0) + (showRowPct ? 1 : 0) + (showColPct ? 1 : 0) + (showTotalPct ? 1 : 0) || 1;
 
@@ -3097,16 +3097,16 @@ export const OutputViewer: React.FC<OutputViewerProps> = ({ outputs, onClearOutp
                   <td>{data.anova_table?.within_groups?.sum_of_squares}</td>
                   <td>{data.anova_table?.within_groups?.df}</td>
                   <td>{data.anova_table?.within_groups?.mean_square}</td>
-                  <td>-</td>
-                  <td>-</td>
+                  <td></td>
+                  <td></td>
                 </tr>
                 <tr className="spss-pivot-total-row">
                   <td className="align-left">Total</td>
                   <td>{data.anova_table?.total?.sum_of_squares}</td>
                   <td>{data.anova_table?.total?.df}</td>
-                  <td>-</td>
-                  <td>-</td>
-                  <td>-</td>
+                  <td></td>
+                  <td></td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>
